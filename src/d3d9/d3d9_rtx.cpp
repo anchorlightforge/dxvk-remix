@@ -17,8 +17,9 @@
 namespace dxvk {
   static const bool s_isDxvkResolutionEnvVarSet = (env::getEnvVar("DXVK_RESOLUTION_WIDTH") != "") || (env::getEnvVar("DXVK_RESOLUTION_HEIGHT") != "");
   
-  // We only look at RT 0 currently.
-  const uint32_t kRenderTargetIndex = 0;
+  // We only look at RT 0 currently. TODO: Force 0 with bool for enabling render target
+  //uint32_t kRenderTargetIndex = 0; 
+  
 
   D3D9Rtx::D3D9Rtx(D3D9DeviceEx* d3d9Device)
     : m_rtStagingData(d3d9Device->GetDXVKDevice(), (VkMemoryPropertyFlagBits) (VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT))
@@ -400,13 +401,13 @@ namespace dxvk {
       return { RtxGeometryStatus::Rasterized, false };
     }
 
-    if (d3d9State().renderTargets[kRenderTargetIndex] == nullptr) {
+    if (d3d9State().renderTargets[getRenderTargetIndex()] == nullptr) {
       ONCE(Logger::info("[RTX-Compatibility-Info] Skipped drawcall, as no color render target bound."));
       return { RtxGeometryStatus::Ignored, false };
     }
 
     constexpr DWORD rgbWriteMask = D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE;
-    if ((d3d9State().renderStates[ColorWriteIndex(kRenderTargetIndex)] & rgbWriteMask) != rgbWriteMask) {
+    if ((d3d9State().renderStates[ColorWriteIndex(getRenderTargetIndex())] & rgbWriteMask) != rgbWriteMask) {
       ONCE(Logger::info("[RTX-Compatibility-Info] Skipped drawcall, colour write disabled."));
       return { RtxGeometryStatus::Ignored, false };
     }
@@ -415,7 +416,7 @@ namespace dxvk {
     // Conditions: non-textured flood-fill draws into a small quad render target
     if (((d3d9State().textureStages[0][D3DTSS_COLOROP] == D3DTOP_SELECTARG1 && d3d9State().textureStages[0][D3DTSS_COLORARG1] != D3DTA_TEXTURE) ||
          (d3d9State().textureStages[0][D3DTSS_COLOROP] == D3DTOP_SELECTARG2 && d3d9State().textureStages[0][D3DTSS_COLORARG2] != D3DTA_TEXTURE))) {
-      auto rtExt = d3d9State().renderTargets[kRenderTargetIndex]->GetSurfaceExtent();
+      auto rtExt = d3d9State().renderTargets[getRenderTargetIndex()]->GetSurfaceExtent();
       // If rt is a quad at least 4 times smaller than backbuffer it is likely a shadow mask
       if (rtExt.width == rtExt.height && rtExt.width < m_activePresentParams.BackBufferWidth / 4) {
         ONCE(Logger::info("[RTX-Compatibility-Info] Skipped shadow mask drawcall."));
@@ -425,7 +426,7 @@ namespace dxvk {
 
     if (!s_isDxvkResolutionEnvVarSet) {
       // NOTE: This can fail when setting DXVK_RESOLUTION_WIDTH or HEIGHT
-      bool isPrimary = isRenderTargetPrimary(m_activePresentParams, d3d9State().renderTargets[kRenderTargetIndex]->GetCommonTexture()->Desc());
+      bool isPrimary = isRenderTargetPrimary(m_activePresentParams, d3d9State().renderTargets[getRenderTargetIndex()]->GetCommonTexture()->Desc());
 
       if (!isPrimary) {
         ONCE(Logger::info("[RTX-Compatibility-Info] Found a draw call to a non-primary render target. Falling back to rasterization"));
@@ -572,7 +573,7 @@ namespace dxvk {
     m_activeDrawCallState.materialData = {};
 
     // Fetch all the legacy state (colour modes, alpha test, etc...)
-    setLegacyMaterialState(m_parent, m_parent->m_alphaSwizzleRTs & (1 << kRenderTargetIndex), m_activeDrawCallState.materialData);
+    setLegacyMaterialState(m_parent, m_parent->m_alphaSwizzleRTs & (1 << getRenderTargetIndex()), m_activeDrawCallState.materialData);
 
     // Fetch fog state 
     setFogState(m_parent, m_activeDrawCallState.fogState);

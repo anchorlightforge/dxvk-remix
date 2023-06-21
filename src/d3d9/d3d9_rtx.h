@@ -25,7 +25,9 @@ namespace dxvk {
     RTX_OPTION("rtx", bool, useVertexCapture, true, "When enabled, injects code into the original vertex shader to capture final shaded vertex positions.  Is useful for games using simple vertex shaders, that still also set the fixed function transform matrices.");
     RTX_OPTION("rtx", bool, useVertexCapturedNormals, true, "When enabled, vertex normals are read from the input assembler and used in raytracing.  This doesn't always work as normals can be in any coordinate space, but can help sometimes.");
     RTX_OPTION("rtx", bool, useWorldMatricesForShaders, true, "When enabled, Remix will utilize the world matrices being passed from the game via D3D9 fixed function API, even when running with shaders.  Sometimes games pass these matrices and they are useful, however for some games they are very unreliable, and should be filtered out.  If you're seeing precision related issues with shader vertex capture, try disabling this setting.");
+    RTX_OPTION("rtx", uint32_t, renderTargetIndex, 0, "Some games may target a different Render Target than the main index.  Try this setting if the camera has issues rendering objects that would appear to be mostly rendering correctly but appear in the wrong place or with depth errors.");
 
+    uint32_t getRenderTargetIndex() { return renderTargetIndex(); }
     // Copy of the parameters issued to D3D9 on DrawXXX
     struct DrawContext {
       D3DPRIMITIVETYPE PrimitiveType;

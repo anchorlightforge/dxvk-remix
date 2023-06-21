@@ -1582,7 +1582,7 @@ namespace dxvk {
       ImGui::Checkbox("Scene Left-Handed", &RtxOptions::Get()->isLHSObject());
       fusedWorldViewModeCombo.getKey(&RtxOptions::Get()->fusedWorldViewModeRef());
       ImGui::Separator();
-
+      ImGui::InputInt("Render Target", &D3D9Rtx::renderTargetIndexObject(), 1, 1, 0);
       ImGui::DragFloat("Unique Object Search Distance", &RtxOptions::Get()->uniqueObjectDistanceObject(), 0.01f, 0.01f, FLT_MAX, "%.3f", sliderFlags);
       ImGui::Separator();
 
