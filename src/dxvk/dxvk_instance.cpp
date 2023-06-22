@@ -199,11 +199,11 @@ namespace dxvk {
 
   const bool enableGpuBasedValidationLayers = false;
 
-#ifndef _DEBUG
+//#ifndef _DEBUG
   const bool enableValidationLayers = false;
-#else
-  const bool enableValidationLayers = true;
-#endif
+//#else
+  //const bool enableValidationLayers = true;
+//#endif
   // NV-DXVK end
 
   DxvkInstance::DxvkInstance() {

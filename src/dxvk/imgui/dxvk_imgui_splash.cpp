@@ -78,6 +78,38 @@ namespace dxvk {
 
       ImGui::PopStyleColor();
       ImGui::PopFont();
+      }
+      
+    if(!RtxOptions::Get()->enableRaytracingRef()) {
+      //This forces a watermark if Path Tracing is enabled to avoid nasty comparison videos to rasterized gameplay
+      //Todo: Make error hard to crop and maybe move it around a bit. If this is what it takes to put the option in release, so be it
+
+      ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always, ImVec2(0.0f, 0.0f));
+
+      // Note: If largeFont is NULL (as it may be if the font has not loaded yet) this will default to the default font.
+      // Large font used to make this more visible as it is important users understand how to access the rendering settings
+      // to adjust performance/quality to their desires.
+      ImGui::PushFont(largeFont);
+
+      // Note: pi-based scalar used to align cycles with seconds countdown nicely.
+      const float pulseInterpolationFactor = (std::cos(elapsedMilliseconds / 1000.0f * kPi / 2.0f) + 1.0f) / 2.0f;
+
+      ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(
+        // Note: Darker variant of roughly-NVIDIA green to have good contrast against white text.
+        lerp(0.15f, 0.268f, pulseInterpolationFactor),
+        lerp(0.15f, 0.42f, pulseInterpolationFactor),
+        lerp(0.15f, 0.03f, pulseInterpolationFactor),
+        lerp(0.8f, 0.95f, pulseInterpolationFactor)
+      ));
+      if (ImGui::Begin("Splash Message", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove)) {
+        //const auto keyBindDescriptor = buildKeyBindDescriptorString(RtxOptions::Get()->remixMenuKeyBinds());
+        std::string message = std::string("Path Tracing Disabled!\nGame visuals may not be representative of original rasterized quality and is available for debugging purposes only.");
+        ImGui::Text(message.c_str());
+      }
+      ImGui::End();
+
+      ImGui::PopStyleColor();
+      ImGui::PopFont();
     }
   }
 

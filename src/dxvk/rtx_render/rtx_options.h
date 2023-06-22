@@ -204,15 +204,15 @@ namespace dxvk {
                   "Defines which hashes we need to include when sampling from replacements and doing USD capture.");
     
   public:
-#ifdef REMIX_DEVELOPMENT
+//#ifdef REMIX_DEVELOPMENT
     // Note, this is currently a debug option we don't want to support in shipping config
     RTX_OPTION_ENV("rtx", bool, enableRaytracing, true, "DXVK_ENABLE_RAYTRACING",
                    "Globally enables or disables ray tracing. When set to false the original game should render mostly as it would in DXVK typically.\n"
                    "Some artifacts may still appear however compared to the original game either due to issues with the underlying DXVK translation or issues in Remix itself.");
-#else
+//#else
     // Shipping config
-    bool enableRaytracing() { return true; }
-#endif
+  //  bool enableRaytracing() { return true; }
+//#endif
 
     RTX_OPTION_ENV("rtx", float, timeDeltaBetweenFrames, 0.f, "RTX_FRAME_TIME_DELTA_MS", "Frame time delta to use during scene processing. Setting this to 0 will use actual frame time delta for a given frame. Non-zero value is primarily used for automation to ensure determinism run to run.");
 
@@ -311,8 +311,10 @@ namespace dxvk {
                "When set to true this message will be hidden, otherwise it will be displayed on every launch.");
   private:
     VirtualKeys m_remixMenuKeyBinds;
+    VirtualKeys m_toggleEnhancementsKeyBinds;
   public:
     const VirtualKeys& remixMenuKeyBinds() const { return m_remixMenuKeyBinds; }
+    const VirtualKeys& toggleEnhancementsKeyBinds() const { return m_toggleEnhancementsKeyBinds; }
 
     RTX_OPTION("rtx", DLSSProfile, qualityDLSS, DLSSProfile::Auto, "Adjusts internal DLSS scaling factor, trades quality for performance.");
     // Note: All ray tracing modes depend on the rtx.raytraceModePreset option as they may be overridden by automatic defaults for a specific vendor if the preset is set to Auto. Set
@@ -1003,6 +1005,9 @@ namespace dxvk {
 
       const VirtualKeys& kDefaultRemixMenuKeyBinds { VirtualKey{VK_MENU},VirtualKey{'X'} };
       m_remixMenuKeyBinds = options.getOption<VirtualKeys>("rtx.remixMenuKeyBinds", kDefaultRemixMenuKeyBinds);
+
+      const VirtualKeys& kDefaultToggleEnhancementsKeyBinds { VirtualKey{VK_MENU},VirtualKey{'R'} };
+      m_toggleEnhancementsKeyBinds = options.getOption<VirtualKeys>("rtx.toggleEnhancementsKeyBinds", kDefaultToggleEnhancementsKeyBinds);
 
       GeometryHashGenerationRule = createRule("Geometry generation", geometryGenerationHashRuleString());
       GeometryAssetHashRule = createRule("Geometry asset", geometryAssetHashRuleString());
