@@ -217,6 +217,8 @@ namespace dxvk {
     RTX_OPTION_ENV("rtx", float, timeDeltaBetweenFrames, 0.f, "RTX_FRAME_TIME_DELTA_MS", "Frame time delta to use during scene processing. Setting this to 0 will use actual frame time delta for a given frame. Non-zero value is primarily used for automation to ensure determinism run to run.");
 
     RTX_OPTION_FLAG("rtx", bool, keepTexturesForTagging, false, RtxOptionFlags::NoSave, "A flag to keep all textures in video memory, which can drastically increase VRAM consumption. Intended to assist with tagging textures that are only used for a short period of time (such as loading screens). Use only when necessary!");
+    //RTX_OPTION("rtx", bool, showLegacyTextureGui, false, "Restores the original Texture Selection UI where every category is separate from one another.");
+    RTX_OPTION("rtx.gui", bool, showLegacyTextureGui, false, "A setting to toggle the old texture selection GUI, where each texture category is represented as its own list.");
 
     RTX_OPTION("rtx", bool, skipDrawCallsPostRTXInjection, false, "Ignores all draw calls recorded after RTX Injection, the location of which varies but is currently based on when tagged UI textures begin to draw.");
     RTX_OPTION("rtx", DlssPreset, dlssPreset, DlssPreset::On, "Combined DLSS Preset for quickly controlling Upscaling, Frame Interpolation and Latency Reduction.");

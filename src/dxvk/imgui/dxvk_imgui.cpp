@@ -141,7 +141,7 @@ namespace dxvk {
   std::vector<RtxTextureOption> rtxTextureOptions = {
     {"uitextures", "UI Texture", &RtxOptions::Get()->uiTexturesObject()},
     {"worldspaceuitextures", "World Space UI Texture", &RtxOptions::Get()->worldSpaceUiTexturesObject()},
-   // {"worldspaceuibackgroundtextures", "World Space UI Background Texture", &RtxOptions::Get()->worldSpaceUiBackgroundTexturesObject()},
+    {"worldspaceuibackgroundtextures", "World Space UI Background Texture", &RtxOptions::Get()->worldSpaceUiBackgroundTexturesObject()},
     {"skytextures", "Sky Texture", &RtxOptions::Get()->skyBoxTexturesObject()},
     {"ignoretextures", "Ignore Texture (optional)", &RtxOptions::Get()->ignoreTexturesObject()},
     {"hidetextures", "Hide Texture Instance (optional)", &RtxOptions::Get()->hideInstanceTexturesObject()},
@@ -1583,7 +1583,7 @@ namespace dxvk {
     const uint32_t numThumbnailsPerRow = uint32_t(std::max(1.f, (m_windowWidth - 18.f) / (thumbnailSize + thumbnailSpacing + thumbnailPadding * 2.f)));
 
     ImGui::Checkbox("Preserve discarded textures", &RtxOptions::Get()->keepTexturesForTaggingObject());
-
+    ImGui::Checkbox("Use Deprecated GUI", &RtxOptions::Get()->showLegacyTextureGuiObject());
     if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 1: Categorize Textures", collapsingHeaderClosedFlags), "Select texture definitions for Remix")) {
       showTextureSelectionGrid(ctx, "textures", numThumbnailsPerRow, thumbnailSize);
     }
@@ -1656,6 +1656,9 @@ namespace dxvk {
       if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 1.2: Worldspace UI Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->worldSpaceUiTexturesDescription())) {
         showTextureSelectionGrid(ctx, "worldspaceuitextures", numThumbnailsPerRow, thumbnailSize);
       }
+      if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 1.3: Worldspace UI Background Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->worldSpaceUiBackgroundTexturesDescription())) {
+        showTextureSelectionGrid(ctx, "worldspaceuibackgroundtextures", numThumbnailsPerRow, thumbnailSize);
+      }
 
       if (ImGui::CollapsingHeader("Step 3: Sky Parameters (optional)", collapsingHeaderClosedFlags)) {
         ImGui::Indent();
@@ -1670,7 +1673,12 @@ namespace dxvk {
       if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 4: Ignore Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->ignoreTexturesDescription())) {
         showTextureSelectionGrid(ctx, "ignoretextures", numThumbnailsPerRow, thumbnailSize);
       }
-
+      if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 4.1: Hide Instance Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->hideInstanceTexturesDescription())) {
+        showTextureSelectionGrid(ctx, "hideInstanceTextures", numThumbnailsPerRow, thumbnailSize);
+      }
+      if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 4.2: Lightmap Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->lightmapTexturesDescription())) {
+        showTextureSelectionGrid(ctx, "lightmapTextures", numThumbnailsPerRow, thumbnailSize);
+      }
       if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 5: Ignore Lights (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->ignoreLightsDescription())) {
         showTextureSelectionGrid(ctx, "ignorelights", numThumbnailsPerRow, thumbnailSize);
       }
@@ -1716,6 +1724,7 @@ namespace dxvk {
         IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 8.4: Anti-Culling Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->antiCullingTexturesDescription())) {
         showTextureSelectionGrid(ctx, "antiCullingTextures", numThumbnailsPerRow, thumbnailSize);
       }
+
 
       if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 9.1: Player Model Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->playerModelTexturesDescription())) {
         showTextureSelectionGrid(ctx, "playermodeltextures", numThumbnailsPerRow, thumbnailSize);
