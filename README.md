@@ -1,12 +1,14 @@
-# dxvk-remix
+# dxvk-remix (Pathologic Classic RTX Branch)
 
 [![Build Status](https://github.com/NVIDIAGameWorks/dxvk-remix/actions/workflows/build.yml/badge.svg)](https://github.com/NVIDIAGameWorks/dxvk-remix/actions/workflows/build.yml)
 
-dxvk-remix is a fork of the [DXVK](https://github.com/doitsujin/dxvk) project, which overhauls the fixed-function graphics pipeline implementation in order to remaster games with path tracing.
+dxvk-remix is a fork of the [DXVK](https://github.com/doitsujin/dxvk) project, which overhauls the fixed-function graphics pipeline implementation in order to remaster games with path tracing.  The branch in this project has additional modifications to allow for greater control over debug rendering functions and ease-of-access for texture hashing/tagging operations. 
 
-Thanks to all the contributors to DXVK for creating this foundational piece of software, on top of which we were able to build the RTX Remix Runtime.
+Thanks to all the contributors to DXVK for creating this foundational piece of software, on top of which we were able to build the RTX Remix Runtime. And to all of the contributors to DXVK-Remix, who made this branch possible.
 
-While dxvk-remix is a fork of DXVK, please report bugs encountered with dxvk-remix to this repo rather than to the DXVK project.
+While dxvk-remix is a fork of DXVK, please report bugs encountered with dxvk-remix to the main DXVK-Remix repo rather than to the DXVK project.
+
+DXVK-Remix readme instructions read as follows:
 
 ## Build instructions
 
