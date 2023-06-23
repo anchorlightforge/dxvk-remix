@@ -1333,7 +1333,11 @@ namespace dxvk {
 
     if (ImGui::CollapsingHeader("Developer Options", collapsingHeaderFlags)) {
       ImGui::Indent();
-      ImGui::Checkbox("Enable", &RtxOptions::Get()->enableDeveloperOptionsObject());
+      ImGui::Checkbox("Enable Developer Mode", &RtxOptions::Get()->enableDeveloperOptionsObject());
+      if (RtxOptions::Get()->enableDeveloperOptions()) {
+        ImGui::Indent();
+        ImGui::Checkbox("Enable Raytracing", &RtxOptions::Get()->enableRaytracingObject());
+      }
       ImGui::Checkbox("Disable Draw Calls Post RTX Injection", &RtxOptions::Get()->skipDrawCallsPostRTXInjectionObject());
       if (ImGui::Checkbox("Block Input to Game in UI", &RtxOptions::Get()->blockInputToGameInUIObject())) {
         sendUIActivationMessage();
@@ -1353,6 +1357,10 @@ namespace dxvk {
       }
       ImGui::Checkbox("Hash Collision Detection", &HashCollisionDetectionOptions::enableObject());
       ImGui::Checkbox("Validate CPU index data", &RtxOptions::Get()->validateCPUIndexDataObject());
+      ImGui::Checkbox("Enable Khronos Validation Layers", &RtxOptions::Get()->enableValidationLayersObject());
+      if (RtxOptions::Get()->enablePresentThrottle()) {
+        ImGui::Checkbox("Enable GPU-Based Validation Layers", &RtxOptions::Get()->enableGPUBasedValidationLayersObject());
+      }
     }
 
     ImGui::PopItemWidth();
@@ -1919,15 +1927,12 @@ namespace dxvk {
       auto& dlss = common->metaDLSS();
       ImGui::Indent();
 
-#ifdef REMIX_DEVELOPMENT
-      ImGui::Checkbox("Raytracing Enabled", & RtxOptions::Get()->enableRaytracingObject()); 
 
       renderPassGBufferRaytraceModeCombo.getKey(&RtxOptions::Get()->renderPassGBufferRaytraceModeObject());
       renderPassIntegrateDirectRaytraceModeCombo.getKey(&RtxOptions::Get()->renderPassIntegrateDirectRaytraceModeObject());
       renderPassIntegrateIndirectRaytraceModeCombo.getKey(&RtxOptions::Get()->renderPassIntegrateIndirectRaytraceModeObject());
 
       ImGui::Separator();
-#endif
 
       showReflexOptions(true);
 
