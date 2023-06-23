@@ -96,10 +96,10 @@ namespace dxvk {
 
       ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(
         // Note: Darker variant of roughly-NVIDIA green to have good contrast against white text.
-        lerp(0.15f, 0.268f, pulseInterpolationFactor),
-        lerp(0.15f, 0.42f, pulseInterpolationFactor),
-        lerp(0.15f, 0.03f, pulseInterpolationFactor),
-        lerp(0.8f, 0.95f, pulseInterpolationFactor)
+        lerp(0.268f,pulseInterpolationFactor,0.15f),
+        lerp(0.42f,pulseInterpolationFactor,0.15f),
+        lerp(0.03f,pulseInterpolationFactor,0.15f),
+        lerp(0.95f,pulseInterpolationFactor,0.8f)
       ));
       if (ImGui::Begin("Splash Message", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove)) {
         //const auto keyBindDescriptor = buildKeyBindDescriptorString(RtxOptions::Get()->remixMenuKeyBinds());

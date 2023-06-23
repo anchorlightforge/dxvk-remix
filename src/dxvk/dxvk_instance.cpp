@@ -197,13 +197,11 @@ namespace dxvk {
     "VK_LAYER_KHRONOS_validation"
   };
 
-  const bool enableGpuBasedValidationLayers = false;
+  bool enableGpuBasedValidationLayers = &RtxOptions::getEnableGPUBasedValidationLayers;
 
-//#ifndef _DEBUG
-  const bool enableValidationLayers = false;
-//#else
-  //const bool enableValidationLayers = true;
-//#endif
+
+  bool enableValidationLayers = &RtxOptions::getEnableValidationLayers;
+
   // NV-DXVK end
 
   DxvkInstance::DxvkInstance() {
