@@ -297,7 +297,7 @@ namespace dxvk {
   constexpr ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus;
   constexpr ImGuiWindowFlags popupWindowFlags = ImGuiWindowFlags_NoSavedSettings;
 
-  ImGUI::ImGUI(const Rc<DxvkDevice>& device, const HWND& hwnd)
+  ImGUI::ImGUI(DxvkDevice* device, const HWND& hwnd)
   : m_device (device)
   , m_hwnd   (hwnd)
   , m_about  (new ImGuiAbout)
@@ -357,8 +357,11 @@ namespace dxvk {
     m_device->vkd()->vkCreateDescriptorPool(m_device->handle(), &pool_info, nullptr, &m_imguiPool);
 
     // Initialize the core structures of ImGui and ImPlot
-    ImGui::CreateContext();
-    ImPlot::CreateContext();
+    m_context = ImGui::CreateContext();
+    m_plotContext = ImPlot::CreateContext();
+
+    ImGui::SetCurrentContext(m_context);
+    ImPlot::SetCurrentContext(m_plotContext);
 
     // Initialize imgui for SDL
     ImGui_ImplWin32_Init(hwnd);
@@ -372,6 +375,11 @@ namespace dxvk {
   }
 
   ImGUI::~ImGUI() {
+    g_imguiTextureMap.clear();
+
+    ImGui::SetCurrentContext(m_context);
+    ImPlot::SetCurrentContext(m_plotContext);
+
     ImGui_ImplWin32_Shutdown();
 
     //add the destroy the imgui created structures
@@ -390,8 +398,8 @@ namespace dxvk {
     }
 
     // Destroy the ImGui and ImPlot context
-    ImPlot::DestroyContext();
-    ImGui::DestroyContext();
+    ImPlot::DestroyContext(m_plotContext);
+    ImGui::DestroyContext(m_context);
   }
   
   void ImGUI::AddTexture(const XXH64_hash_t hash, const Rc<DxvkImageView>& imageView) {
@@ -413,6 +421,7 @@ namespace dxvk {
   }
 
   void ImGUI::wndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    ImGui::SetCurrentContext(m_context);
     ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam);
   }
 
@@ -1584,9 +1593,11 @@ namespace dxvk {
 
     ImGui::Checkbox("Preserve discarded textures", &RtxOptions::Get()->keepTexturesForTaggingObject());
     ImGui::Checkbox("Use Deprecated GUI", &RtxOptions::Get()->showLegacyTextureGuiObject());
-    if(!showLegacyTextureGui())
-    if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 1: Categorize Textures", collapsingHeaderClosedFlags), "Select texture definitions for Remix")) {
-      showTextureSelectionGrid(ctx, "textures", numThumbnailsPerRow, thumbnailSize);
+
+    if(!showLegacyTextureGui()) {
+      if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 1: Categorize Textures", collapsingHeaderClosedFlags), "Select texture definitions for Remix")) {
+        showTextureSelectionGrid(ctx, "textures", numThumbnailsPerRow, thumbnailSize);
+      }
     }
 
     if (ImGui::CollapsingHeader("Step 2: Parameter Tuning", collapsingHeaderClosedFlags)) {
@@ -2438,6 +2449,9 @@ namespace dxvk {
     VkExtent2D        surfaceSize) {
     ScopedGpuProfileZone(ctx, "ImGUI Render");
 
+    ImGui::SetCurrentContext(m_context);
+    ImPlot::SetCurrentContext(m_plotContext);
+
     // Sometimes games can change windows on us, so we need to check that here and tell ImGUI
     if (m_hwnd != hwnd) {
       m_hwnd = hwnd;
@@ -2476,7 +2490,7 @@ namespace dxvk {
     this->resetRendererState(ctx);
   }
   
-  Rc<ImGUI> ImGUI::createGUI(const Rc<DxvkDevice>& device, const HWND& hwnd) {
+  Rc<ImGUI> ImGUI::createGUI(DxvkDevice* device, const HWND& hwnd) {
     return new ImGUI(device, hwnd);
   }
 
