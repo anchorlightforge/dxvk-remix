@@ -144,8 +144,8 @@ namespace dxvk {
     {"worldspaceuibackgroundtextures", "World Space UI Background Texture", &RtxOptions::Get()->worldSpaceUiBackgroundTexturesObject()},
     {"skytextures", "Sky Texture", &RtxOptions::Get()->skyBoxTexturesObject()},
     {"ignoretextures", "Ignore Texture (optional)", &RtxOptions::Get()->ignoreTexturesObject()},
-    {"hidetextures", "Hide Texture Instance (optional)", &RtxOptions::Get()->hideInstanceTexturesObject()},
-    {"lightmaptextures","Lightmap Textures (optional)", &RtxOptions::Get()->lightmapTexturesObject()},
+    {"hideinstancetextures", "Hide Texture Instance (optional)", &RtxOptions::Get()->hideInstanceTexturesObject()},
+    {"lightmaptextures","Lightmap Texture (optional)", &RtxOptions::Get()->lightmapTexturesObject()},
     {"ignorelights", "Ignore Lights (optional)", &RtxOptions::Get()->ignoreLightsObject()},
     {"particletextures", "Particle Texture (optional)", &RtxOptions::Get()->particleTexturesObject()},
     {"beamtextures", "Beam Texture (optional)", &RtxOptions::Get()->beamTexturesObject()},
@@ -1593,8 +1593,11 @@ namespace dxvk {
 
     ImGui::Checkbox("Preserve discarded textures", &RtxOptions::Get()->keepTexturesForTaggingObject());
     ImGui::Checkbox("Use Deprecated GUI", &RtxOptions::Get()->showLegacyTextureGuiObject());
-    if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 1: Categorize Textures", collapsingHeaderClosedFlags), "Select texture definitions for Remix")) {
-      showTextureSelectionGrid(ctx, "textures", numThumbnailsPerRow, thumbnailSize);
+
+    if(!showLegacyTextureGui()) {
+      if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 1: Categorize Textures", collapsingHeaderClosedFlags), "Select texture definitions for Remix")) {
+        showTextureSelectionGrid(ctx, "textures", numThumbnailsPerRow, thumbnailSize);
+      }
     }
 
     if (ImGui::CollapsingHeader("Step 2: Parameter Tuning", collapsingHeaderClosedFlags)) {
@@ -1683,10 +1686,10 @@ namespace dxvk {
         showTextureSelectionGrid(ctx, "ignoretextures", numThumbnailsPerRow, thumbnailSize);
       }
       if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 4.1: Hide Instance Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->hideInstanceTexturesDescription())) {
-        showTextureSelectionGrid(ctx, "hideInstanceTextures", numThumbnailsPerRow, thumbnailSize);
+        showTextureSelectionGrid(ctx, "hideinstancetextures", numThumbnailsPerRow, thumbnailSize);
       }
       if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 4.2: Lightmap Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->lightmapTexturesDescription())) {
-        showTextureSelectionGrid(ctx, "lightmapTextures", numThumbnailsPerRow, thumbnailSize);
+        showTextureSelectionGrid(ctx, "lightmaptextures", numThumbnailsPerRow, thumbnailSize);
       }
       if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 5: Ignore Lights (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->ignoreLightsDescription())) {
         showTextureSelectionGrid(ctx, "ignorelights", numThumbnailsPerRow, thumbnailSize);
