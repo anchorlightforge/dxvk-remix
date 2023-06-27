@@ -197,6 +197,7 @@ namespace dxvk {
     RW_RTX_OPTION("rtx.antiCulling", fast_unordered_set, antiCullingTextures, {},
                   "[Experimental] Textures that are forced to extend life length when anti-culling is enabled.\n"
                   "Some games use different culling methods we can't fully match, use this option to manually add textures to force extend their life when anti-culling fails.");
+    RW_RTX_OPTION("rtx.postfx", fast_unordered_set, motionBlurMaskOutTextures, {}, "Disable motion blur for meshes with specific texture.");
 
     RW_RTX_OPTION("rtx", std::string, geometryGenerationHashRuleString, "positions,indices,texcoords,geometrydescriptor,vertexlayout,vertexshader",
                   "Defines which asset hashes we need to generate via the geometry processing engine.");
@@ -271,10 +272,10 @@ namespace dxvk {
     RTX_OPTION("rtx", uint32_t, maxPrimsInMergedBLAS, 50000, "");
 
     // Camera
-    RTX_OPTION("rtx", bool, shakeCamera, false, "");
-    RTX_OPTION("rtx", CameraAnimationMode, cameraAnimationMode, CameraAnimationMode::CameraShake_Pitch, "");
-    RTX_OPTION("rtx", int, cameraShakePeriod, 20, "");
-    RTX_OPTION("rtx", float, cameraAnimationAmplitude, 2.0f, "");
+    RTX_OPTION_ENV("rtx", bool, shakeCamera, false, "RTX_FREE_CAMERA_ENABLE_ANIMATION", "Enables animation of the free camera.");
+    RTX_OPTION_ENV("rtx", CameraAnimationMode, cameraAnimationMode, CameraAnimationMode::CameraShake_Pitch, "RTX_FREE_CAMERA_ANIMATION_MODE", "Free camera's animation mode.");
+    RTX_OPTION_ENV("rtx", int, cameraShakePeriod, 20, "RTX_FREE_CAMERA_ANIMATION_PERIOD", "Period of the free camera's animation.");
+    RTX_OPTION_ENV("rtx", float, cameraAnimationAmplitude, 2.0f, "RTX_FREE_CAMERA_ANIMATION_AMPLITUDE", "Amplitude of the free camera's animation.");
     RTX_OPTION("rtx", bool, skipObjectsWithUnknownCamera, false, "");
     RTX_OPTION("rtx", bool, enableNearPlaneOverride, false,
                "A flag to enable or disable the Camera's near plane override feature.\n"
@@ -1129,6 +1130,10 @@ namespace dxvk {
 
     bool isAnimatedWaterTexture(const XXH64_hash_t& h) const {
       return animatedWaterTextures().find(h) != animatedWaterTextures().end();
+    }
+
+    bool isMotionBlurMaskOutTexture(const XXH64_hash_t& h) const {
+      return motionBlurMaskOutTextures().find(h) != motionBlurMaskOutTextures().end();
     }
 
     bool isAntiCullingTexture(const XXH64_hash_t& h) const {
