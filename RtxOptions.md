@@ -71,6 +71,8 @@ Tables below enumerate all the options and their defaults set by RTX Remix. Note
 |rtx.autoExposure.exposureWeightCurve4|float|1|Curve control point 4\.|
 |rtx.autoExposure.useExposureCompensation|bool|False|Uses a curve to determine the importance of different exposure levels when calculating average exposure\.|
 |rtx.automation.disableBlockingDialogBoxes|bool|False|Disables various blocking blocking dialog boxes \(such as popup windows\) requiring user interaction when set to true, otherwise uses default behavior when set to false\.<br>This option is typically meant for automation\-driven execution of Remix where such dialog boxes if present may cause the application to hang due to blocking waiting for user input\.|
+|rtx.automation.disableDisplayMemoryStatistics|bool|False|Disables display of memory statistics in the Remix window\.<br>This option is typically meant for automation of tests for which we don't want non\-deterministic runtime memory statistics to be shown in GUI that is included as part of test image output\.|
+|rtx.automation.disableUpdateUpscaleFromDlssPreset|bool|False|Disables updating upscaler from DLSS preset\.<br>This option is typically meant for automation of tests for which we don't want upscaler to be updated based on a DLSS preset\.|
 |rtx.blockInputToGameInUI|bool|True||
 |rtx.bloom.enable|bool|True||
 |rtx.bloom.intensity|float|0.06||
@@ -504,9 +506,9 @@ Tables below enumerate all the options and their defaults set by RTX Remix. Note
 |rtx.stochasticAlphaBlendUseNeighborSearch|bool|True|Get radiance from neighbor opaque pixels\.|
 |rtx.stochasticAlphaBlendUseRadianceVolume|bool|True|Get radiance from radiance volume\.|
 |rtx.taauPreset|int|1|Adjusts TAA\-U scaling factor, trades quality for performance\.|
-|rtx.temporalAA.colorClampingFactor|float|1||
-|rtx.temporalAA.maximumRadiance|float|10000||
-|rtx.temporalAA.newFrameWeight|float|1||
+|rtx.temporalAA.colorClampingFactor|float|1|A scalar factor to apply to the standard deviation of the neighborhood of pixels in the color signal used for clamping\. Should be in the range 0\-infinity\.<br>This value essentially represents how many standard deviations of tolerance from the current frame's colors around each pixel pixel the temporally accumulated color signal may have\.<br>Higher values will cause more ghosting whereas lower values may reduce ghosting but will impact image quality \(less ability to upscale effectively\) and reduce stability \(more jittering\)\.|
+|rtx.temporalAA.maximumRadiance|float|10000|The maximum value to use in TAA\-U's perceptual quantizer color transformation, measured in cd/m^2\.<br>The typical value used for the PQ transformation is 10,000 and usually shouldn't be changed\.|
+|rtx.temporalAA.newFrameWeight|float|0.1|The maximum amount of the current frame to use as part of the temporal anti\-aliasing process\. Must be in the range 0\-1\.<br>Values closer to 0 will result in better image stability \(less jittering\) and less aliasing, values closer to 1 will result in more responsive results \(less ghosting\)\.|
 |rtx.terrainBaker.cascadeMap.defaultHalfWidth|float|1000|Cascade map square's default half width around the camera \[meters\]\. Used when the terrain's BBOX couldn't be estimated\.|
 |rtx.terrainBaker.cascadeMap.defaultHeight|float|1000|Cascade map baker's camera default height above the in\-game camera \[meters\]\. Used when the terrain's BBOX couldn't be estimated\.|
 |rtx.terrainBaker.cascadeMap.expandLastCascade|bool|True|Expands the last cascade's footprint to cover the whole cascade map\. This ensures all terrain surface has valid baked texture data to sample from across the cascade map's range even if there isn't enough cascades generated \(due to the current settings or limitations\)\.|
