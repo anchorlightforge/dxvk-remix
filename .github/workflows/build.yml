@@ -32,7 +32,7 @@ jobs:
         submodules: recursive
         
     - name: Setup Vulkan SDK
-      run: choco install vulkan-sdk --version 1.2.182.0 -y
+      run: choco install vulkan-sdk --noop --disable-repository-optimizations --version 1.2.182.0 -y
 
     - name: Setup Meson
       run: pip install meson==0.62.1
