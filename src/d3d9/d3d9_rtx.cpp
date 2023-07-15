@@ -497,7 +497,8 @@ namespace dxvk {
 
   D3D9Rtx::PrepareDrawType D3D9Rtx::internalPrepareDraw(const IndexContext& indexContext, const VertexContext vertexContext[caps::MaxStreams], const DrawContext& drawContext) {
     ScopedCpuProfileZone();
-
+    
+    const uint32_t kRenderTargetIndex = getRenderTargetIndex();
     // RTX was injected => treat everything else as rasterized 
     if (m_rtxInjectTriggered) {
       return { !RtxOptions::Get()->skipDrawCallsPostRTXInjection(), false };
