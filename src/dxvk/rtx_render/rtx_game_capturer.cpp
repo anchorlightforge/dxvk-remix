@@ -205,13 +205,20 @@ namespace dxvk {
                           m_cap.camera.aspectRatio,
                           m_cap.camera.fov,
                           m_cap.camera.nearPlane,
-                          m_cap.camera.farPlane, shearX, shearY, m_cap.camera.isLHS, m_cap.camera.isReverseZ);
-
+                          m_cap.camera.farPlane,
+                          shearX,
+                          shearY,
+                          m_cap.camera.isLHS,
+                          m_cap.camera.isReverseZ);
       // Infinite projection is legit, but USD doesnt take kindly to it
-      if (isinf(m_cap.camera.farPlane)) {
-        m_cap.camera.farPlane = 100000000;
+      constexpr float kMaxFarPlane = 100000000;
+      if (m_cap.camera.farPlane > kMaxFarPlane) {
+        m_cap.camera.farPlane = kMaxFarPlane;
       }
-
+      if(m_cap.camera.aspectRatio < 0) {
+        m_cap.camera.aspectRatio = abs(m_cap.camera.aspectRatio);
+        m_cap.camera.bFlipVertAperture = true;
+      }
       m_cap.camera.firstTime = m_cap.currentFrameNum;
     }
     assert(!isnan(m_cap.camera.fov));
@@ -312,7 +319,7 @@ namespace dxvk {
     for (const RtInstance* rtInstancePtr : m_sceneManager.getInstanceTable()) {
       assert(rtInstancePtr->getBlas() != nullptr);
 
-      if (rtInstancePtr->getBlas()->input.isSky) {
+      if (rtInstancePtr->getBlas()->input.cameraType == CameraType::Sky) {
         if (!m_cap.bSkyProbeBaked) {
           m_exporter.bakeSkyProbe(ctx, BASE_DIR + relPath::remixCaptureTexturesDir, commonFileName::bakedSkyProbe);
           m_cap.bSkyProbeBaked = true;
@@ -345,7 +352,7 @@ namespace dxvk {
         }
       }
       instance.lssData.finalTime = m_cap.currentFrameNum;
-      instance.lssData.isSky = rtInstancePtr->getBlas()->input.isSky;
+      instance.lssData.isSky = (rtInstancePtr->getBlas()->input.cameraType == CameraType::Sky);
     }
   }
 
@@ -425,7 +432,7 @@ namespace dxvk {
       std::lock_guard lock(m_meshMutex);
       pMesh = m_cap.meshes[currentMeshHash];
     }
-
+          
     // Note: Ensures that reading a Vec3 from the position buffer will result in the proper values. This can be extended if
     // games use odd formats like R32G32B32A32 in the future, but cannot be less than 3 components unless the code is modified
     // to accomodate other strange formats.
@@ -455,13 +462,21 @@ namespace dxvk {
     }
 
     if (bCapturePositions && geomData.positionBuffer.defined()) {
-      captureMeshPositions(ctx, geomData, m_cap.currentFrameNum, pMesh);
+      if (skinData.numBones > 0) {
+        captureMeshPositions(ctx, rasterGeomData.vertexCount, rasterGeomData.positionBuffer, m_cap.currentFrameNum, pMesh);
+      } else {
+        captureMeshPositions(ctx, geomData.vertexCount, geomData.positionBuffer, m_cap.currentFrameNum, pMesh);
+      }
     }
-
+    
     if (bCaptureNormals && geomData.normalBuffer.defined()) {
-      captureMeshNormals(ctx, geomData, m_cap.currentFrameNum, pMesh);
+      if (skinData.numBones > 0) {
+        captureMeshNormals(ctx, rasterGeomData.vertexCount, rasterGeomData.normalBuffer, m_cap.currentFrameNum, pMesh);
+      } else {
+        captureMeshNormals(ctx, geomData.vertexCount, geomData.normalBuffer, m_cap.currentFrameNum, pMesh);
+      }
     }
-
+    
     if (bCaptureIndices && geomData.indexBuffer.defined()) {
       captureMeshIndices(ctx, geomData, m_cap.currentFrameNum, pMesh);
     }
@@ -480,22 +495,23 @@ namespace dxvk {
     }
   }
 
+  template <typename T>
   void GameCapturer::captureMeshPositions(const Rc<DxvkContext> ctx,
-                                          const RaytraceGeometry& geomData,
+                                          const size_t numVertices,
+                                          const T& inputPositionBuffer,
                                           const float currentFrameNum,
                                           std::shared_ptr<Mesh> pMesh) {
-
-    AssetExporter::BufferCallback captureMeshPositionsAsync = [ctx, geomData, currentFrameNum, pMesh](Rc<DxvkBuffer> posBuf) {
+                                            
+    AssetExporter::BufferCallback captureMeshPositionsAsync = [ctx, numVertices, inputPositionBuffer, currentFrameNum, pMesh](Rc<DxvkBuffer> posBuf) {
       // Prep helper vars
-      const size_t numVertices = geomData.vertexCount;
       constexpr size_t positionSubElementSize = sizeof(float);
-      const size_t positionStride = geomData.positionBuffer.stride() / positionSubElementSize;
+      const size_t positionStride = inputPositionBuffer.stride() / positionSubElementSize;
       const DxvkBufferSlice positionBuffer(posBuf, 0, posBuf->info().size);
       // Ensure no reads are out of bounds
-      assert(((size_t) (numVertices - 1) * (size_t) geomData.positionBuffer.stride() + sizeof(pxr::GfVec3f)) <=
-             (positionBuffer.length() - geomData.positionBuffer.offsetFromSlice()));
+      assert(((size_t) (numVertices - 1) * (size_t)inputPositionBuffer.stride() + sizeof(pxr::GfVec3f)) <=
+            (positionBuffer.length() - inputPositionBuffer.offsetFromSlice()));
       // Get copied-to-CPU GPU buffer
-      const float* pVkPosBuf = (float*) positionBuffer.mapPtr((size_t) geomData.positionBuffer.offsetFromSlice());
+      const float* pVkPosBuf = (float*) positionBuffer.mapPtr((size_t)inputPositionBuffer.offsetFromSlice());
       assert(pVkPosBuf);
       // Copy GPU buffer to local VtArray
       pxr::VtArray<pxr::GfVec3f> positions;
@@ -514,26 +530,27 @@ namespace dxvk {
       evalNewBufferAndCache(pMesh, pMesh->lssData.buffers.positionBufs, positions, currentFrameNum, positionsDifferentEnough);
     };
     pMesh->meshSync.numOutstandingInc();
-    m_exporter.copyBufferFromGPU(ctx, geomData.positionBuffer, captureMeshPositionsAsync);
+    m_exporter.copyBufferFromGPU(ctx, inputPositionBuffer, captureMeshPositionsAsync);
   }
 
+  template <typename T>
   void GameCapturer::captureMeshNormals(const Rc<DxvkContext> ctx,
-                                        const RaytraceGeometry& geomData,
+                                        const size_t numVertices,
+                                        const T& inputNormalBuffer,
                                         const float currentFrameNum,
                                         std::shared_ptr<Mesh> pMesh) {
-
-    AssetExporter::BufferCallback captureMeshNormalsAsync = [ctx, geomData, currentFrameNum, pMesh](Rc<DxvkBuffer> norBuf) {
-      assert(geomData.normalBuffer.vertexFormat() == VK_FORMAT_R32G32B32_SFLOAT);
+                                          
+    AssetExporter::BufferCallback captureMeshNormalsAsync = [ctx, numVertices, inputNormalBuffer, currentFrameNum, pMesh](Rc<DxvkBuffer> norBuf) {
+      assert(inputNormalBuffer.vertexFormat() == VK_FORMAT_R32G32B32_SFLOAT);
       // Prep helper vars
-      const size_t numVertices = geomData.vertexCount;
       constexpr size_t normalSubElementSize = sizeof(float);
-      const size_t normalStride = geomData.normalBuffer.stride() / normalSubElementSize;
-      const DxvkBufferSlice normalBuffer(norBuf, 0, norBuf->info().size);
+      const size_t normalStride = inputNormalBuffer.stride() / normalSubElementSize;
+      const DxvkBufferSlice normalBuffer(norBuf, 0, norBuf->info().size );
       // Ensure no reads are out of bounds
-      assert(((size_t) (numVertices - 1) * (size_t) geomData.normalBuffer.stride() + sizeof(pxr::GfVec3f)) <=
-             (normalBuffer.length() - geomData.normalBuffer.offsetFromSlice()));
+      assert(((size_t) (numVertices - 1) * (size_t)inputNormalBuffer.stride() + sizeof(pxr::GfVec3f)) <=
+            (normalBuffer.length() - inputNormalBuffer.offsetFromSlice()));
       // Get copied-to-CPU GPU buffer
-      const float* pVkNormalBuf = (float*) normalBuffer.mapPtr((size_t) geomData.normalBuffer.offsetFromSlice());
+      const float* pVkNormalBuf = (float*) normalBuffer.mapPtr((size_t)inputNormalBuffer.offsetFromSlice());
       assert(pVkNormalBuf);
       // Copy GPU buffer to local VtArray
       pxr::VtArray<pxr::GfVec3f> normals;
@@ -552,7 +569,7 @@ namespace dxvk {
       evalNewBufferAndCache(pMesh, pMesh->lssData.buffers.normalBufs, normals, currentFrameNum, normalsDifferentEnough);
     };
     pMesh->meshSync.numOutstandingInc();
-    m_exporter.copyBufferFromGPU(ctx, geomData.normalBuffer, captureMeshNormalsAsync);
+    m_exporter.copyBufferFromGPU(ctx, inputNormalBuffer, captureMeshNormalsAsync);
   }
 
   template<typename T>
@@ -800,8 +817,7 @@ namespace dxvk {
   void GameCapturer::exportStep() {
     if (getState(StateFlag::BeginExport)) {
       static auto exportThreadTask = [](Capture cap,
-                                        dxvk::mutex* pMutex,
-                                        size_t* pNumOutstandingExportThreads,
+                                        std::atomic<size_t>* pNumOutstandingExportThreads,
                                         const float framesPerSecond,
                                         const bool bUseLssUsdPlugins) {
         const auto exportPrep = prepExport(cap, framesPerSecond, bUseLssUsdPlugins);
@@ -811,31 +827,26 @@ namespace dxvk {
         Logger::info("[GameCapturer][" + cap.idStr + "] End USD export");
 
         // Necessary step for being able to properly diff and check for regressions
-        if (!env::getEnvVar("DXVK_CAPTURE_FLATTEN").empty()) {
+        const auto flattenCaptureEnvStr = env::getEnvVar("DXVK_CAPTURE_FLATTEN");
+        if (!flattenCaptureEnvStr.empty()) {
           flattenExport(exportPrep);
         }
 
-        {
-          std::lock_guard lock(*pMutex);
-          (*pNumOutstandingExportThreads)--;
-        }
+        (*pNumOutstandingExportThreads)--;
       };
       std::thread(exportThreadTask,
                   std::move(m_cap),
-                  &exportThreadMutex,
-                  &numOutstandingExportThreads,
+                  &m_numOutstandingExportThreads,
                   m_framesPerSecond,
                   m_bUseLssUsdPlugins).detach();
-      {
-        std::lock_guard lock(exportThreadMutex);
-        numOutstandingExportThreads++;
-      }
+      m_numOutstandingExportThreads++;
+
       m_cap = Capture(); // reset to default
       setState(StateFlag::Exporting, true);
       setState(StateFlag::BeginExport, false);
     }
 
-    if (numOutstandingExportThreads == 0) {
+    if (m_numOutstandingExportThreads.load() == 0) {
       setState(StateFlag::Exporting, false);
     }
   }

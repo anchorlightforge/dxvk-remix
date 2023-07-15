@@ -27,8 +27,13 @@ namespace dxvk
 
 namespace {
   bool exactMatch(const DrawCallState& drawCall, BlasEntry& blas) {
-    if (drawCall.isSky != blas.input.isSky)
+    auto isSky = [](CameraType::Enum t) {
+      return t == CameraType::Sky;
+    };
+
+    if (isSky(drawCall.cameraType) != isSky(blas.input.cameraType)) {
       return false;
+    }
 
     return drawCall.getMaterialData().getHash() == blas.input.getMaterialData().getHash()
         && drawCall.getGeometryData().getHashForRule<rules::FullGeometryHash>() == blas.input.getGeometryData().getHashForRule<rules::FullGeometryHash>()
@@ -36,7 +41,7 @@ namespace {
   }
 }
 
-DrawCallCache::DrawCallCache(Rc<DxvkDevice> device) : m_device(device) {
+DrawCallCache::DrawCallCache(DxvkDevice* device) : CommonDeviceObject(device) {
   m_entries.reserve(1024);
 }
 DrawCallCache::~DrawCallCache() {}
