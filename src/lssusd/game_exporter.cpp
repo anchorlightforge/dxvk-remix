@@ -74,14 +74,6 @@
 #include "../util/util_env.h"
 
 namespace {
-pxr::VtArray<pxr::TfToken> generateJointsList(size_t numBones) {
-  pxr::VtArray<pxr::TfToken> result(numBones);
-  for (int i = 0; i < numBones; ++i) {
-    result[i] = pxr::TfToken(dxvk::str::format("joint", i));
-  }
-  return result;
-}
-
 inline pxr::GfMatrix4d ToRHS(const pxr::GfMatrix4d& xform) {
   static pxr::GfMatrix4d XYflip(pxr::GfVec4d(1.0, 1.0, -1.0, 1.0));
 
@@ -90,15 +82,81 @@ inline pxr::GfMatrix4d ToRHS(const pxr::GfMatrix4d& xform) {
   return XYflip * xform * XYflip;
 }
 
-pxr::VtMatrix4dArray sanitizeBoneXforms(const pxr::SdfPath& sdfPath,
-                                               const pxr::VtMatrix4dArray& xforms,
-                                               const lss::ExportMetaData& meta) {
+pxr::VtMatrix4dArray sanitizeBoneXforms(const pxr::VtMatrix4dArray& xforms,
+                                        const pxr::VtMatrix4dArray& bindPose,
+                                        const lss::Export::Meta& meta) {
+  const size_t numBones = xforms.size();
   pxr::VtMatrix4dArray sanitizedXforms;
-  sanitizedXforms.reserve(xforms.size());
-  for (const pxr::GfMatrix4d& xform: xforms) {
-    sanitizedXforms.push_back(meta.isLHS ? ToRHS(xform) : xform);
+  sanitizedXforms.resize(numBones);
+  pxr::GfMatrix4d worldFromRoot(1);
+
+
+  if (numBones > 0) {
+    const pxr::GfMatrix4d rootFromWorld = bindPose[0] * xforms[0];
+    worldFromRoot = rootFromWorld.GetInverse();
+    sanitizedXforms[0] = meta.isLHS ? ToRHS(rootFromWorld) : rootFromWorld;
   }
+  for (int i = 1; i < numBones; ++i) {
+    const pxr::GfMatrix4d xformFromRoot = bindPose[i] * xforms[i] * worldFromRoot;
+    sanitizedXforms[i] = meta.isLHS ? ToRHS(xformFromRoot) : xformFromRoot;
+  }
+
   return sanitizedXforms;
+}
+
+lss::Skeleton generateSkeleton(const size_t numBones,
+                              const size_t bonesPerVertex,
+                              const lss::PositionBuffer& points,
+                              const lss::BlendWeightBuffer* weights,
+                              const lss::BlendIndicesBuffer* indices) {
+  lss::Skeleton output;
+  output.bindPose.resize(numBones);
+  output.restPose.resize(numBones);
+  output.jointNames.resize(numBones);
+
+  pxr::VtMatrix4dArray boneXforms;
+  std::vector<pxr::GfVec3d> weightedPosSums;
+  std::vector<float> totalWeights(numBones, 0);
+  weightedPosSums.resize(numBones);
+  const float equalBlend = 1.f / bonesPerVertex;
+
+  if (numBones > 0) {
+    for (int i = 0; i < points.size(); ++i) {
+      for (int j = 0; j < bonesPerVertex; ++j) {
+        const float weight = weights == nullptr ? equalBlend : (*weights)[i * bonesPerVertex + j];
+        if (weight > 0.00001) {
+          const int ind = indices == nullptr ? j : (*indices)[i * bonesPerVertex + j];
+          weightedPosSums[ind] += points[i] * weight;
+          totalWeights[ind] += weight;
+        }
+      }
+    }
+    //Note: Bind pose is global transforms, restPose is local transforms.
+
+    pxr::GfVec3d rootBindPos(0);
+    if (totalWeights[0] == 0) {
+      output.bindPose[0].SetIdentity();
+    } else {
+      rootBindPos = weightedPosSums[0] / totalWeights[0];
+      output.bindPose[0].SetTranslate(rootBindPos);
+    }
+    output.restPose[0] = output.bindPose[0];
+
+    for (int i = 1; i < numBones; ++i) {
+      if (totalWeights[i] == 0) {
+        output.bindPose[i].SetIdentity();
+        output.restPose[i].SetIdentity();
+      } else {
+        output.bindPose[i].SetTranslate(weightedPosSums[i] / totalWeights[i]);
+        output.restPose[i].SetTranslate(weightedPosSums[i] / totalWeights[i] - rootBindPos);
+      }
+    }
+  }
+  output.jointNames[0] = pxr::TfToken("root");
+  for (int i = 1; i < numBones; ++i) {
+    output.jointNames[i] = pxr::TfToken(dxvk::str::format("root/joint", i));
+  }
+  return output;
 }
 }
 
@@ -384,14 +442,19 @@ void GameExporter::exportSkeletons(const Export& exportData, ExportContext& ctx)
     // Set bindTransforms attribute
     auto bindTransformsAttr = skelSchema.CreateBindTransformsAttr();
     assert(bindTransformsAttr);
-    pxr::VtMatrix4dArray boneXforms = sanitizeBoneXforms(skeletonSdfPath, mesh.boneXForms, exportData.meta);
-    bindTransformsAttr.Set(boneXforms);
+    ctx.skeletons[meshId] = generateSkeleton(mesh.numBones,
+                                             mesh.bonesPerVertex,
+                                             mesh.buffers.positionBufs.begin()->second,
+                                             mesh.buffers.blendWeightBufs.empty() ? nullptr : &mesh.buffers.blendWeightBufs.begin()->second,
+                                             mesh.buffers.blendIndicesBufs.empty() ? nullptr : &mesh.buffers.blendIndicesBufs.begin()->second);
+    const Skeleton& skel = ctx.skeletons[meshId];
+    // pxr::VtMatrix4dArray identities(mesh.numBones, pxr::GfMatrix4d(1));
+    bindTransformsAttr.Set(skel.bindPose);
 
     // Set restTransforms attribute
     auto restTransformsAttr = skelSchema.CreateRestTransformsAttr();
     assert(restTransformsAttr);
-    pxr::VtMatrix4dArray identities(mesh.numBones, pxr::GfMatrix4d(1));
-    restTransformsAttr.Set(identities);
+    restTransformsAttr.Set(skel.restPose);
 
     // Create SkelAnimation prim with a pose
     const auto skelPoseSdfPath = defaultPrimPath.AppendChild(gTokPose);
@@ -399,17 +462,16 @@ void GameExporter::exportSkeletons(const Export& exportData, ExportContext& ctx)
     assert(skelAnimationSchema);
 
     // set the rotations, scales, and translations attributes on the pose
-    skelAnimationSchema.SetTransforms(identities);
+    skelAnimationSchema.SetTransforms(skel.restPose);
 
     // Set joints attribute on both the skeleton and the pose
-    const pxr::VtArray<pxr::TfToken> jointsList = generateJointsList(mesh.numBones);
     auto jointsAttr = skelSchema.CreateJointsAttr();
     assert(jointsAttr);
-    jointsAttr.Set(jointsList);
+    jointsAttr.Set(skel.jointNames);
 
     auto jointsAttr2 = skelAnimationSchema.CreateJointsAttr();
     assert(jointsAttr2);
-    jointsAttr2.Set(jointsList);
+    jointsAttr2.Set(skel.jointNames);
 
     // Bind the pose to the skeleton
     pxr::UsdSkelBindingAPI skelBindingSchema = pxr::UsdSkelBindingAPI::Apply(skelSchema.GetPrim());
@@ -625,14 +687,18 @@ void GameExporter::exportMeshes(const Export& exportData, ExportContext& ctx) {
 GameExporter::ReducedIdxBufSet GameExporter::reduceIdxBufferSet(const std::map<float,IndexBuffer>& idxBufSet) {
   ReducedIdxBufSet reducedIdxBufSet;
   for(const auto& [timeCode, idxBuf] : idxBufSet) {
-    int minIdx = std::numeric_limits<int>::max();
-    for(const int idx : idxBuf) {
-      minIdx = std::min(idx, minIdx);
+    const std::set<int> orderedIndices(idxBuf.cbegin(), idxBuf.cend());
+    int newIdx = 0;
+    ReducedIdxBufSet::IdxMap ogToRed;
+    for(const auto index : orderedIndices) {
+      ogToRed[index] = newIdx++;
     }
-    for(const int idx : idxBuf) {
-      reducedIdxBufSet.bufSet[timeCode].push_back(idx - minIdx);
+    for(const auto ogIdx : idxBuf) {
+      const auto redIdx = ogToRed[ogIdx];
+      assert(redIdx <= ogIdx);
+      reducedIdxBufSet.bufSet[timeCode].push_back(redIdx);
+      reducedIdxBufSet.redToOgSet[timeCode][redIdx] = ogIdx;
     }
-    reducedIdxBufSet.idxOffsets[timeCode] = minIdx;
   }
   return reducedIdxBufSet;
 }
@@ -641,35 +707,34 @@ template<typename T>
 std::map<float,pxr::VtArray<T>> GameExporter::reduceBufferSet(const std::map<float,pxr::VtArray<T>>& bufSet,
                                                               const ReducedIdxBufSet& reducedIdxBufSet,
                                                               size_t elemsPerIdx) {
-  static const auto getIdxBufTimeCode =
-    [](const ReducedIdxBufSet& reducedIdxBufSet, const float bufTimeCode)
-  {
-    if(reducedIdxBufSet.bufSet.size() > 1) {
-      auto itr = reducedIdxBufSet.bufSet.lower_bound(bufTimeCode);
-      assert(itr != reducedIdxBufSet.bufSet.cend());
-      const float idxTimeCode = itr->first;
-      return itr->first;
-    } else {
-      return reducedIdxBufSet.bufSet.cbegin()->first;
-    }
-  };
   std::map<float,pxr::VtArray<T>> reducedBufSet;
   for(const auto& [timeCode, buf] : bufSet) {
     // There may not be a 1:1 mapping in timecodes b/w index buffers and other buffers
-    const float idxBufTimeCode = getIdxBufTimeCode(reducedIdxBufSet, timeCode);
-    const IndexBuffer& idxBuf = reducedIdxBufSet.bufSet.at(idxBufTimeCode);
-    const int idxBufReductionOffset = reducedIdxBufSet.idxOffsets.at(idxBufTimeCode) * elemsPerIdx;
-    // Sort indices
-    std::set<int> sortedIdxSet(idxBuf.cbegin(), idxBuf.cend());
+    float idxBufTimeCode = -1.f;
+    if(reducedIdxBufSet.bufSet.size() > 1) {
+      const auto iPair_timeCode_idxBuf = reducedIdxBufSet.bufSet.lower_bound(timeCode);
+      assert(iPair_timeCode_idxBuf != reducedIdxBufSet.bufSet.cend());
+      const float idxTimeCode = iPair_timeCode_idxBuf->first;
+      idxBufTimeCode = iPair_timeCode_idxBuf->first;
+    } else {
+      idxBufTimeCode = reducedIdxBufSet.bufSet.cbegin()->first;
+    }
+    assert(idxBufTimeCode >= 0.f);
+
     // Create a scratch space to assign values for new, reduce VtArray, in case there are holes in the indices
-    const int maxIdx = *(--sortedIdxSet.cend());
-    const size_t numElems = (maxIdx + 1) * elemsPerIdx;
+    const auto& redIdxToOgIdx = reducedIdxBufSet.redToOgSet.at(idxBufTimeCode);
+    const int numIdxs = redIdxToOgIdx.size();
+    const size_t numElems = numIdxs * elemsPerIdx;
     T* const reducedBufScratch = new T[numElems];
+    
     // Init potential holes to 0
     memset(reducedBufScratch, 0, sizeof(T) * numElems);
-    for(const int index : sortedIdxSet) {
-      for (int elem = 0; elem < elemsPerIdx; ++elem) {
-        reducedBufScratch[(index * elemsPerIdx) + elem] = buf[(index * elemsPerIdx + idxBufReductionOffset ) + elem];
+    for(const auto [redIndex,ogIndex] : redIdxToOgIdx) {
+      for (int elemNum = 0; elemNum < elemsPerIdx; ++elemNum) {
+        const auto ogIdx = (ogIndex * elemsPerIdx) + elemNum;
+        const auto redIdx = (redIndex * elemsPerIdx) + elemNum;
+        assert(redIdx <= ogIdx);
+        reducedBufScratch[redIdx] = buf[ogIdx];
       }
     }
     reducedBufSet[timeCode] = pxr::VtArray<T>(reducedBufScratch, reducedBufScratch + numElems);
@@ -737,11 +802,14 @@ void GameExporter::exportInstances(const Export& exportData, ExportContext& ctx)
       const auto skelPoseSdfPath = fullInstancePath.AppendChild(gTokPose);
       auto skelAnimationSchema = pxr::UsdSkelAnimation::Define(ctx.instanceStage, skelPoseSdfPath);
       assert(skelAnimationSchema);
+      const lss::Skeleton& skel = ctx.skeletons[instanceData.meshId];
+
+      skelAnimationSchema.CreateJointsAttr().Set(skel.jointNames);
 
       // set the rotations, scales, and translations attributes on the pose
       for (auto sample : instanceData.boneXForms) {
         skelAnimationSchema.SetTransforms(
-            sanitizeBoneXforms(skelPoseSdfPath, sample.xforms, exportData.meta),
+            sanitizeBoneXforms(sample.xforms, skel.bindPose, exportData.meta),
             exportData.meta.numFramesCaptured == 1 ? pxr::UsdTimeCode::Default() : pxr::UsdTimeCode(sample.time));
       }
     }
@@ -773,7 +841,11 @@ void GameExporter::exportCamera(const Export& exportData, ExportContext& ctx) {
 
   // Set Vertical aperture
   auto verticalAperture = geomCamera.CreateVerticalApertureAttr();
-  verticalAperture.Set(simpleCam.GetVerticalAperture());
+  float verticalApertureVal = simpleCam.GetVerticalAperture();
+  if(exportData.camera.bFlipVertAperture) {
+    verticalApertureVal *= (-1.f);
+  }
+  verticalAperture.Set(verticalApertureVal);
 
   // Set focal length
   auto focalLength = geomCamera.CreateFocalLengthAttr();
@@ -1006,7 +1078,7 @@ void GameExporter::setTimeSampledXforms(const pxr::UsdStageRefPtr stage,
                                         const float firstTime,
                                         const float finalTime,
                                         const SampledXforms& xforms,
-                                        const ExportMetaData& meta,
+                                        const Export::Meta& meta,
                                         const bool teleportAway) {
   assert(stage);
   assert(sdfPath != pxr::SdfPath());

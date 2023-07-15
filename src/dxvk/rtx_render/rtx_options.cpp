@@ -29,6 +29,10 @@ namespace dxvk {
   std::unique_ptr<RtxOptions> RtxOptions::pInstance = nullptr;
 
   void RtxOptions::updateUpscalerFromDlssPreset() {
+    if (RtxOptions::Automation::disableUpdateUpscaleFromDlssPreset()) {
+      return;
+    }
+
     switch (dlssPreset()) {
       case DlssPreset::Off:
         upscalerTypeRef() = UpscalerType::None;
@@ -223,7 +227,7 @@ namespace dxvk {
       pathMinBouncesRef() = 0;
       pathMaxBouncesRef() = 2;
       enableVolumetricLightingRef() = true;
-      enableUnorderedEmissiveParticlesInIndirectRaysRef() = true;
+      enableUnorderedEmissiveParticlesInIndirectRaysRef() = false;
       denoiseDirectAndIndirectLightingSeparatelyRef() = false;
       minReplacementTextureMipMapLevelRef() = 1;
       enableUnorderedResolveInIndirectRaysRef() = true;
