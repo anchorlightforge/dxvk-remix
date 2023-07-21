@@ -62,7 +62,11 @@ jobs:
         Get-ChildItem -Path "..\_output" -Recurse -Filter *.pdb | Copy-Item
         Get-ChildItem -Path "..\_output" -Recurse -Filter *.dll | Copy-Item
         Get-ChildItem -Path "..\_output" -Recurse -Filter *.txt | Copy-Item
-        cd ".."
+        New-Item ".\.trex" -Type Directory
+        cd ".\.trex"
+        Get-ChildItem -Path "..\*.dll" | Move-Item
+        Get-ChildItem -Path "..\*.pdb" | Move-Item
+        cd "..\.."
         Compress-Archive -Path ".\_upload\*" -DestinationPath "dxvk-remix-${{env.GITHUB_SHA_SHORT}}-${{github.run_number}}-${{matrix.build-flavour}}.zip"
 
     - name: "Prune automatic CI/CD releases to latest"
@@ -80,7 +84,7 @@ jobs:
         tag_name: "automatic-${{matrix.build-flavour}}"
         prerelease: true
         generate_release_notes: true
-        name: "dxvk-remix-${{env.GITHUB_SHA_SHORT}}-${{github.run_number}}-${{matrix.build-flavour}}"
+        name: "dxvk-remix-automatic-${{matrix.build-flavour}}"
         files: | 
           *.zip
           _upload/*.txt
