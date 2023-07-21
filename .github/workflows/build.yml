@@ -2,14 +2,15 @@ name: Build
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, autorelease-testing ]
   pull_request:
     branches: [ main ]
 
 jobs:
   build-windows:
     runs-on: windows-2022
-    permissions: write-all
+    permissions: 
+      contents: write
     strategy:
       matrix:
         include:
@@ -56,13 +57,13 @@ jobs:
     - name: Create clean directory for CI/CD release 
       shell: pwsh
       run: |
-        New-Item ".\_release" -Type Directory
-        cd ".\_release"
+        New-Item ".\_upload" -Type Directory
+        cd ".\_upload"
         Get-ChildItem -Path "..\_output" -Recurse -Filter *.pdb | Copy-Item
         Get-ChildItem -Path "..\_output" -Recurse -Filter *.dll | Copy-Item
         Get-ChildItem -Path "..\_output" -Recurse -Filter *.txt | Copy-Item
         cd ".."
-        Compress-Archive -Path ".\_release\*" -DestinationPath "dxvk-remix-${{env.GITHUB_SHA_SHORT}}-${{github.run_number}}-${{matrix.build-flavour}}.zip"
+        Compress-Archive -Path ".\_upload\*" -DestinationPath "dxvk-remix-${{env.GITHUB_SHA_SHORT}}-${{github.run_number}}-${{matrix.build-flavour}}.zip"
 
     - name: "Prune automatic CI/CD releases to latest"
       uses: dev-drprasad/delete-older-releases@v0.2.1
@@ -73,12 +74,13 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: "Create new CI/CD release"
-      uses: "marvinpinto/action-automatic-releases@latest"
+      uses: "softprops/action-gh-release@v1"
       with:
-        repo_token: "${{ secrets.GITHUB_TOKEN }}"
-        automatic_release_tag: "automatic-${{matrix.build-flavour}}"
+        token: "${{ secrets.GITHUB_TOKEN }}"
+        tag_name: "automatic-${{matrix.build-flavour}}"
         prerelease: true
-        title: "dxvk-remix-${{env.GITHUB_SHA_SHORT}}-${{github.run_number}}-${{matrix.build-flavour}}"
+        generate_release_notes: true
+        name: "dxvk-remix-${{env.GITHUB_SHA_SHORT}}-${{github.run_number}}-${{matrix.build-flavour}}"
         files: | 
           *.zip
-          _release/*.txt
+          _upload/*.txt
