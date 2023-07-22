@@ -92,7 +92,6 @@ jobs:
         Get-ChildItem -Path "..\*.dll" | Move-Item
         Get-ChildItem -Path "..\*.pdb" | Move-Item
         cd "..\.."
-        Compress-Archive -Path ".\_upload\*" -DestinationPath "dxvk-remix-${{github.run_number}}-${{env.GITHUB_SHA_SHORT}}-${{matrix.build-flavour}}.zip"
     
     - name: Generate Checksum
       uses: jmgilman/actions-generate-checksum@v1.0.0
@@ -100,6 +99,13 @@ jobs:
         .\_upload\.trex\*.pdb
         .\_upload\.trex\*.dll
 
+    - name: Compress artifacts into archive
+      shell: pwsh
+      run: |
+        cd ".\_upload"
+        Get-ChildItem -Path "..\checksum.txt" | Move-Item
+        cd ".."
+        Compress-Archive -Path ".\_upload\*" -DestinationPath "dxvk-remix-${{github.run_number}}-${{env.GITHUB_SHA_SHORT}}-${{matrix.build-flavour}}.zip"
     - name: "Prune automatic CI/CD releases to latest"
       uses: dev-drprasad/delete-older-releases@v0.2.1
       with:
