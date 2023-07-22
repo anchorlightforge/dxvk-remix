@@ -1,5 +1,7 @@
 name: Mirror Repo
 on:
+  push:
+    branches: [mirror-nightly]
   schedule:
     # nightly (0th hour 0th minute of every day)
     - cron:  '0 0 * * *'
@@ -91,6 +93,12 @@ jobs:
         Get-ChildItem -Path "..\*.pdb" | Move-Item
         cd "..\.."
         Compress-Archive -Path ".\_upload\*" -DestinationPath "dxvk-remix-${{github.run_number}}-${{env.GITHUB_SHA_SHORT}}-${{matrix.build-flavour}}.zip"
+    
+    - name: Generate Checksum
+      uses: jmgilman/actions-generate-checksum@v1.0.0
+      patterns: |
+        .\_upload\.trex\*.pdb
+        .\_upload\.trex\*.dll
 
     - name: "Prune automatic CI/CD releases to latest"
       uses: dev-drprasad/delete-older-releases@v0.2.1
