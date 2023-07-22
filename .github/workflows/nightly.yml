@@ -12,8 +12,8 @@ jobs:
     steps:
     - name: Mirror
       run: |
-        git remote add upstream https://github.com/NVIDIAGameWorks/dxvk-remix.git
         git fetch --all
+        git remote add upstream https://github.com/NVIDIAGameWorks/dxvk-remix.git
         git checkout -b nightly
         git pull upstream main
         git push
