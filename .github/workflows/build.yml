@@ -2,9 +2,16 @@ name: Build
 
 on:
   push:
-    branches: [ main, nightly ]
+    branches: [ nightly ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
+  inputs:
+    name:
+      type: choice
+      description: "Build type"
+      options:
+      - "nightly"
 
 jobs:
   build-windows:
@@ -30,6 +37,7 @@ jobs:
       uses: actions/checkout@v3
       with:
         submodules: recursive
+        ref: nightly
 
     - name: Setup Meson
       run: pip install meson==0.62.1
