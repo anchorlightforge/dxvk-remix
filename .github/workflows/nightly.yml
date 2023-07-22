@@ -24,7 +24,7 @@ jobs:
         git config --global user.email "${GITHUB_ACTOR}@users.noreply.github.com"
         git checkout -b nightly
         git fetch origin main
-        git fetch origin nightly
+        git fetch origin nightly || true
         git fetch upstream main
         git pull upstream main
         git push origin nightly
