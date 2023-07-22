@@ -16,8 +16,9 @@ jobs:
         submodules: recursive
     - name: Mirror
       run: |
-        git fetch --all
         git remote add upstream https://github.com/NVIDIAGameWorks/dxvk-remix.git
+        git config pull.rebase true
+        git fetch --all
         git checkout -b nightly
         git pull upstream main
         git push
