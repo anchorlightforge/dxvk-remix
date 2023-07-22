@@ -22,9 +22,9 @@ jobs:
         git config pull.rebase false
         git config --global user.name "${GITHUB_ACTOR}"
         git config --global user.email "${GITHUB_ACTOR}@users.noreply.github.com"
+        git checkout -b nightly
         git fetch origin main
         git fetch origin nightly
         git fetch upstream main
-        git checkout -b nightly
         git pull upstream main
         git push origin nightly
