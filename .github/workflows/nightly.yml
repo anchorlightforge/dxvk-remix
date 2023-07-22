@@ -98,7 +98,7 @@ jobs:
       run: |
         foreach($file in Get-ChildItem -Path ".\_upload" -Recurse -Filter *.* -Attributes !Directory)
         {
-          Get-FileHash $file | Add-Content -Path hashes.txt
+          Get-FileHash -Path $file | Add-Content -Path hashes.txt
         }
 
     - name: Compress artifacts into archive
