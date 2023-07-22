@@ -12,14 +12,11 @@ jobs:
       contents: write
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
-      with:
-        submodules: recursive
     - name: Mirror
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
+        https://github.com/NVIDIAGameWorks/dxvk-remix.git
         git remote add upstream https://github.com/NVIDIAGameWorks/dxvk-remix.git
         git config pull.rebase false
         git config --global user.name "${GITHUB_ACTOR}"
