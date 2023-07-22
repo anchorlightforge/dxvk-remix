@@ -16,7 +16,7 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        https://github.com/NVIDIAGameWorks/dxvk-remix.git
+        git clone https://github.com/NVIDIAGameWorks/dxvk-remix.git
         git remote add upstream https://github.com/NVIDIAGameWorks/dxvk-remix.git
         git config pull.rebase false
         git config --global user.name "${GITHUB_ACTOR}"
