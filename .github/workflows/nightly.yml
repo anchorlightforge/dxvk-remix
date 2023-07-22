@@ -95,9 +95,10 @@ jobs:
     
     - name: Generate Checksum
       uses: jmgilman/actions-generate-checksum@v1.0.0
-      patterns: |
-        .\_upload\.trex\*.pdb
-        .\_upload\.trex\*.dll
+      with:
+        patterns: |
+          .\_upload\.trex\*.pdb
+          .\_upload\.trex\*.dll
 
     - name: Compress artifacts into archive
       shell: pwsh
