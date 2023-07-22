@@ -67,7 +67,7 @@ jobs:
         Get-ChildItem -Path "..\*.dll" | Move-Item
         Get-ChildItem -Path "..\*.pdb" | Move-Item
         cd "..\.."
-        Compress-Archive -Path ".\_upload\*" -DestinationPath "dxvk-remix-${{env.GITHUB_SHA_SHORT}}-${{github.run_number}}-${{matrix.build-flavour}}.zip"
+        Compress-Archive -Path ".\_upload\*" -DestinationPath "dxvk-remix-${{github.run_number}}-${{env.GITHUB_SHA_SHORT}}-${{matrix.build-flavour}}.zip"
 
     - name: "Prune automatic CI/CD releases to latest"
       uses: dev-drprasad/delete-older-releases@v0.2.1
