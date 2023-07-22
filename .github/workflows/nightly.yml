@@ -24,7 +24,7 @@ jobs:
         git config pull.rebase true
         git config --global user.name "${GITHUB_ACTOR}"
         git config --global user.email "${GITHUB_ACTOR}@users.noreply.github.com"
-        git push origin -d nightly
+        git push origin -d nightly || true
         git fetch --all
         git checkout -b nightly
         git pull upstream main
