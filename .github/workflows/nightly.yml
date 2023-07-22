@@ -96,7 +96,7 @@ jobs:
     - name: Generate Checksums
       shell: pwsh
       run: |
-        foreach($file in Get-ChildItem -Path ".\_upload" -Recurse -Filter *.* -Attributes !Directory)
+        foreach($file in Get-ChildItem -Path ".\_upload" -Recurse -Filter *.* -Attributes !Directory -Name)
         {
           Get-FileHash -Path $file | Add-Content -Path hashes.txt
         }
