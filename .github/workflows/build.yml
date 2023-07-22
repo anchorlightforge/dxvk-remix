@@ -2,7 +2,7 @@ name: Build
 
 on:
   push:
-    branches: [ main, autorelease-testing ]
+    branches: [ main ]
   pull_request:
     branches: [ main ]
 
