@@ -21,12 +21,8 @@ jobs:
         git config --global user.name "${GITHUB_ACTOR}"
         git config --global user.email "${GITHUB_ACTOR}@users.noreply.github.com"
         git fetch --all
-        git checkout -b nightly
+        git checkout main
         git pull upstream main
         git push
-        git checkout main
-        git pull nightly
-        git push
-        git push origin -d nightly
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
