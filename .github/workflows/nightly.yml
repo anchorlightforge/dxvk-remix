@@ -27,4 +27,4 @@ jobs:
         git fetch --all
         git checkout -b nightly
         git pull upstream main
-        git push --set-upstream origin nightly
+        git push origin nightly
