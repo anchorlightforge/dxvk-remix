@@ -18,6 +18,8 @@ jobs:
       run: |
         git remote add upstream https://github.com/NVIDIAGameWorks/dxvk-remix.git
         git config pull.rebase true
+        git config --global user.name "${GITHUB_ACTOR}"
+        git config --global user.email "${GITHUB_ACTOR}@users.noreply.github.com"
         git fetch --all
         git checkout -b nightly
         git pull upstream main
