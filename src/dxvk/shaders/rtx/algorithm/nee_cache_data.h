@@ -19,20 +19,26 @@
 * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 * DEALINGS IN THE SOFTWARE.
 */
+#pragma once
 
-#include "rtx_env.h"
+#define NEE_CACHE_PROBE_RESOLUTION 32
+#define NEE_CACHE_ELEMENTS 16
+// Element size in bytes
+#define NEE_CACHE_ELEMENT_SIZE 4 * 2
+#define NEE_CACHE_TASK_SIZE 4
+#define NEE_CACHE_EMPTY_TASK 0xffffffff
 
-#include <Windows.h>
-#include "rtx_options.h"
+#define NEE_CACHE_SAMPLES 16
 
-namespace dxvk {
+struct NeeCache_PackedSample
+{
+  uint4 hitGeometry;              ///< position and normal.
+  uint4 lightInfo;                ///< radiance and pdf
+};
 
-  void messageBox(const char* text, const char* caption, uint32_t type) {
-    // Note: Respect the blocking dialog box disable flag when attempting to open this message box to not
-    // cause blocking on user input when not desired.
-    if (!RtxOptions::Automation::disableBlockingDialogBoxes()) {
-      MessageBox(NULL, text, caption, type);
-    }
-  }
-
-}
+enum class NeeEnableMode
+{
+  None = 0,
+  SpecularOnly = 1,
+  All = 2,
+};

@@ -499,6 +499,7 @@ namespace dxvk {
         "aa16c42fa367111c"
       },
       { "rtx.lightmapTextures",
+        "441282E47FE7CB64,"
         "050173DFF733DBE1,"
         "913E194A071E2720,"
         "8D39476483C92F63,"
@@ -801,7 +802,6 @@ namespace dxvk {
       { "rtx.animatedWaterTextures",
         "522E5513DB9638B6,"
       },        
-      { "d3d9.maxEnabledLights",     "32" }, // This game seems to read this caps bit and push more lights accordingly.
       { "rtx.zUp",                   "True" },
       { "rtx.uniqueObjectDistance",  "300.0" }, // Game is 1unit=1cm - picking up objects can move them very quickly, 3m should be sufficient.
       { "rtx.rayPortalModelTextureHashes",        "5EC61BC800744B26, DFDACB6DE1C7741E" }, // Orange and Blue Portal textures
@@ -849,6 +849,7 @@ namespace dxvk {
       { "rtx.upscalingMipBias",                                 "-0.4"  },
       { "rtx.legacyMaterial.roughnessConstant",                 "0.1"   },
       { "rtx.opacityMicromap.enable",                           "True"  },
+      { "rtx.decals.maxOffsetIndex",                            "64" },
       // TODO (REMIX-656): Remove this once we can transition content to new hash
       { "rtx.geometryGenerationHashRuleString", "positions,"
                                                 "indices,"

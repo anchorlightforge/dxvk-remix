@@ -40,7 +40,7 @@
 #include "rtx/pass/instance_definitions.h"
 
 namespace dxvk {
-
+  
   static bool isMirrorTransform(const Matrix4& m) {
     // Note: Identify if the winding is inverted by checking if the z axis is ever flipped relative to what it's expected to be for clockwise vertices in a lefthanded space
     // (x cross y) through the series of transformations
@@ -121,7 +121,9 @@ namespace dxvk {
     , m_geometryFlags(src.m_geometryFlags)
     , m_objectToWorldMirrored(src.m_objectToWorldMirrored)
     , m_firstBillboard(src.m_firstBillboard)
-    , m_billboardCount(src.m_billboardCount) {
+    , m_billboardCount(src.m_billboardCount)
+    , m_lastDecalOffsetVertexDataVersion(src.m_lastDecalOffsetVertexDataVersion)
+    , m_currentDecalOffsetDifference(src.m_currentDecalOffsetDifference) {
     // Members for which state carry over is intentionally skipped
     /*
        m_isMarkedForGC
@@ -245,10 +247,11 @@ namespace dxvk {
     return m_vkInstance.mask & OBJECT_MASK_VIEWMODEL_VIRTUAL;
   }
 
-  InstanceManager::InstanceManager(Rc<DxvkDevice> device, ResourceCache* pResourceCache)
-    : m_device(device)
+  InstanceManager::InstanceManager(DxvkDevice* device, ResourceCache* pResourceCache)
+    : CommonDeviceObject(device)
     , m_pResourceCache(pResourceCache) {
-    m_previousViewModelState = RtxOptions::Get()->isViewModelEnabled();
+    m_previousViewModelState = RtxOptions::ViewModel::enable();
+    m_currentDecalOffsetIndex = RtxOptions::Decals::baseOffsetIndex();
   }
 
   InstanceManager::~InstanceManager() {
@@ -283,7 +286,7 @@ namespace dxvk {
 
     // Need to release all instances when ViewModel enablement changes
     // This is a big hammer but it's fine, it's a debugging feature
-    const bool isViewModelEnabled = RtxOptions::Get()->isViewModelEnabled();
+    const bool isViewModelEnabled = RtxOptions::ViewModel::enable();
     if (isViewModelEnabled != m_previousViewModelState) {
       for (auto* instance : m_instances) {
         removeInstance(instance);
@@ -339,7 +342,7 @@ namespace dxvk {
   void InstanceManager::onFrameEnd() {
     m_viewModelCandidates.clear();
     m_playerModelInstances.clear();
-    m_currentDecalIndex = c_firstDecalIndex;
+    m_currentDecalOffsetIndex = RtxOptions::Decals::baseOffsetIndex();
     resetSurfaceIndices();
     m_billboards.clear();
   }
@@ -353,12 +356,19 @@ namespace dxvk {
     // An attempt to resolve cases where games pre-combine view and world matrices
     if (RtxOptions::Get()->resolvePreCombinedMatrices() &&
       isIdentityExact(drawCall.getTransformData().worldToView)) {
-      objectToWorld = cameraManager.getLastSetCamera().getViewToWorld(false) * drawCall.getTransformData().objectToView;
-      worldToProjection = drawCall.getTransformData().viewToProjection * cameraManager.getLastSetCamera().getWorldToView(false);
+      const auto* referenceCamera = &cameraManager.getCamera(drawCall.cameraType);
+      // Note: we may accept a data even from a prev frame, as we need any information to restore;
+      // but if camera data is stale, it introduces an scene object transform's lag
+      if (!referenceCamera->isValid(m_device->getCurrentFrameId()) &&
+        !referenceCamera->isValid(m_device->getCurrentFrameId() - 1)) {
+        referenceCamera = &cameraManager.getCamera(CameraType::Main);
+      }
+      objectToWorld = referenceCamera->getViewToWorld(false) * drawCall.getTransformData().objectToView;
+      worldToProjection = drawCall.getTransformData().viewToProjection * referenceCamera->getWorldToView(false);
     }
 
     // Search for an existing instance matching our input
-    RtInstance* currentInstance = findSimilarInstance(blas, drawCall, material, objectToWorld, cameraManager, rayPortalManager);
+    RtInstance* currentInstance = findSimilarInstance(blas, material, objectToWorld, drawCall.cameraType, rayPortalManager);
 
     if (currentInstance == nullptr) {
       // No existing match - so need to create one
@@ -577,7 +587,7 @@ namespace dxvk {
     // NOTE: In the future we could extend this with heuristics as needed...
   }
 
-  RtInstance* InstanceManager::findSimilarInstance(const BlasEntry& blas, const DrawCallState& drawCall, const RtSurfaceMaterial& material, const Matrix4& transform, const CameraManager& cameraManager, const RayPortalManager& rayPortalManager) {
+  RtInstance* InstanceManager::findSimilarInstance(const BlasEntry& blas, const RtSurfaceMaterial& material, const Matrix4& transform, CameraType::Enum cameraType, const RayPortalManager& rayPortalManager) {
 
     // Disable temporal correlation between instances so that duplicate instances are not created
     // should a developer option change instance enough for it not to match anymore
@@ -635,7 +645,7 @@ namespace dxvk {
     // For portal gun and other objects that were drawn in the ViewModel, need to check the
     // virtual version of the instance from previous frame.
     if (nearestDistSqr > 0.0f &&
-        cameraManager.getLastSetCameraType() == CameraType::ViewModel && 
+        cameraType == CameraType::ViewModel && 
         RtxOptions::Get()->isRayPortalVirtualInstanceMatchingEnabled() ) {
       for (const RtInstance* instance : blas.getLinkedInstances()) {
         if (instance->m_frameLastUpdated != currentFrameIdx - 1 || 
@@ -797,15 +807,15 @@ namespace dxvk {
 
     // Hide the sky instance since it is not raytraced.
     // Sky mesh and material are only good for capture and replacement purposes.
-    currentInstance.m_isHidden |= drawCall.isSky;
-
-    const CameraType::Enum cameraType = cameraManager.getLastSetCameraType();
+    if (drawCall.cameraType == CameraType::Sky) {
+      currentInstance.m_isHidden = true;
+    }
 
     // Register camera
-    bool isNewCameraSet = currentInstance.registerCamera(cameraType, m_device->getCurrentFrameId());
+    bool isNewCameraSet = currentInstance.registerCamera(drawCall.cameraType, m_device->getCurrentFrameId());
 
     const bool overridePreviousCameraUpdate = isNewCameraSet &&
-      (cameraType == CameraType::Main ||
+      (drawCall.cameraType == CameraType::Main ||
        // Don't overwrite transform from when the instance was seen with the main camera
        !currentInstance.isCameraRegistered(CameraType::Main));
 
@@ -836,6 +846,7 @@ namespace dxvk {
         currentInstance.m_materialDataHash = drawCall.getMaterialData().getHash();
         currentInstance.m_materialHash = material.getHash();
         currentInstance.m_texcoordHash = drawCall.getGeometryData().hashes[HashComponents::VertexTexcoord];
+        currentInstance.m_indexHash = drawCall.getGeometryData().hashes[HashComponents::Indices];
 
         // Surface meta data
         currentInstance.surface.isEmissive = false;
@@ -852,6 +863,7 @@ namespace dxvk {
         currentInstance.surface.isAnimatedWater = RtxOptions::Get()->isAnimatedWaterTexture(drawCall.getMaterialData().getHash());
         currentInstance.surface.associatedGeometryHash = drawCall.getHash(RtxOptions::Get()->GeometryAssetHashRule);
         currentInstance.surface.isTextureFactorBlend = drawCall.getMaterialData().isTextureFactorBlend;
+        currentInstance.surface.isMotionBlurMaskOut = RtxOptions::Get()->isMotionBlurMaskOutTexture(drawCall.getMaterialData().getHash());
 
         // For worldspace UI, we want to show the UI (unlit) in the world.  So configure the blend mode if blending is used accordingly.
         if (currentInstance.m_isWorldSpaceUI) {
@@ -913,17 +925,8 @@ namespace dxvk {
       }
     }
 
-    // Associate instances with hitGroups according to their material
-
-    switch (material.getType()) {
-    case RtSurfaceMaterialType::Opaque:
-    case RtSurfaceMaterialType::Translucent:
-      currentInstance.m_vkInstance.instanceShaderBindingTableRecordOffset = HIT_GROUP_MATERIAL_OPAQUE_TRANSLUCENT;
-      break;
-    case RtSurfaceMaterialType::RayPortal:
-      currentInstance.m_vkInstance.instanceShaderBindingTableRecordOffset = HIT_GROUP_MATERIAL_RAYPORTAL;
-      break;
-    };
+    // We only have 1 hit shader.
+    currentInstance.m_vkInstance.instanceShaderBindingTableRecordOffset = 0;
 
     // Update instance flags.
     // Note: this should happen on instance updates and not creation because the same geometry can be drawn
@@ -997,7 +1000,7 @@ namespace dxvk {
     {
       uint mask = isFirstUpdateThisFrame ? 0 : currentInstance.m_vkInstance.mask;
 
-      if (currentInstance.m_isPlayerModel && cameraType != CameraType::ViewModel) {
+      if (currentInstance.m_isPlayerModel && drawCall.cameraType != CameraType::ViewModel) {
         mask |= OBJECT_MASK_PLAYER_MODEL;
         m_playerModelInstances.push_back(&currentInstance);
       } else {
@@ -1045,11 +1048,11 @@ namespace dxvk {
 
     currentInstance.m_billboardCount = 0;
 
-    if (cameraType == CameraType::ViewModel && !currentInstance.m_isHidden && isFirstUpdateThisFrame)
+    if (drawCall.cameraType == CameraType::ViewModel && !currentInstance.m_isHidden && isFirstUpdateThisFrame)
       m_viewModelCandidates.push_back(&currentInstance);
 
     if (RtxOptions::Get()->enableSeparateUnorderedApproximations() &&
-        (cameraType == CameraType::Main || cameraType == CameraType::ViewModel) &&
+        (drawCall.cameraType == CameraType::Main || drawCall.cameraType == CameraType::ViewModel) &&
         currentInstance.m_isUnordered &&
         !currentInstance.m_isHidden &&
         currentInstance.getVkInstance().mask != 0) {
@@ -1092,7 +1095,7 @@ namespace dxvk {
     // View model instances are recreated every frame
     viewModelInstance->markForGarbageCollection();
 
-    if (RtxOptions::Get()->isViewModelPerspectiveCorrectionEnabled()) {
+    if (RtxOptions::ViewModel::perspectiveCorrection()) {
       // A transform that looks "correct" only from a main camera's point of view
       const auto corrected = perspectiveCorrection * reference.getTransform();
       const auto prevCorrected = prevPerspectiveCorrection * reference.getPrevTransform();
@@ -1139,7 +1142,7 @@ namespace dxvk {
                                                  const RayPortalManager& rayPortalManager) {
     ScopedGpuProfileZone(ctx, "ViewModel");
 
-    if (!RtxOptions::Get()->isViewModelEnabled())
+    if (!RtxOptions::ViewModel::enable())
       return;
 
     if (!cameraManager.isCameraValid(CameraType::ViewModel))
@@ -1167,7 +1170,7 @@ namespace dxvk {
 
     // Apply an extra scaling matrix to the view-space positions of view model to make it less likely to interact with world geometry.
     Matrix4 scaleMatrix {};
-    scaleMatrix[0][0] = scaleMatrix[1][1] = scaleMatrix[2][2] = RtxOptions::Get()->getViewModelScale();
+    scaleMatrix[0][0] = scaleMatrix[1][1] = scaleMatrix[2][2] = RtxOptions::ViewModel::scale();
     scaleMatrix[3][3] = 1.f;
 
     // Compute the view-model perspective correction matrix.
@@ -1514,7 +1517,7 @@ namespace dxvk {
         clonedInstance->setPrevTransform(prevObjectToWorld);
       }
 
-      // Use a clip plane to make sure that the cloned instance doesn't stick through a thin slab
+      // Use a clip plane to make sure that the cloned instance doesn't stick through a slab
       // that the other portal might be placed on.
       clonedInstance->surface.isClipPlaneEnabled = true;
       clonedInstance->surface.clipPlane = Vector4(farPortalInfo->entryPortalInfo.planeNormal,
@@ -1543,7 +1546,7 @@ namespace dxvk {
 
     const Vector3& camPos = cameraManager.getCamera(CameraType::Main).getPosition(/* freecam = */ false);
 
-    const float kMaxDistanceToPortal = RtxOptions::Get()->getViewModelRangeMeters() * RtxOptions::Get()->getMeterToWorldUnitScale();
+    const float kMaxDistanceToPortal = RtxOptions::ViewModel::rangeMeters() * RtxOptions::Get()->getMeterToWorldUnitScale();
 
     // Find the closest valid portal to generate the instances for since we can generate 
     // virtual instances only for one of the portals due to instance mask bit allocation.
@@ -1577,7 +1580,7 @@ namespace dxvk {
       return;
     }
 
-    if (!RtxOptions::Get()->isViewModelVirtualInstancesEnabled())
+    if (!RtxOptions::ViewModel::enableVirtualInstances())
       return;
 
     const SingleRayPortalDirectionInfo& closestPortalInfo = rayPortalManager.getRayPortalPairInfos()[0]->pairInfos[m_virtualInstancePortalIndex];
@@ -1630,50 +1633,64 @@ namespace dxvk {
 
   // This function goes over all decals and offsets each one along its normal.
   // The offset is different per-decal and generally grows with every draw call and every decal in a draw call,
-  // only wrapping around to 0 when some limit is reached.
+  // only wrapping around to start offset index when some limit is reached.
   // This offsetting takes care of procedural decals that are entirely coplanar, which doesn't work with
   // ray tracing because we want to hit every decal with a closest-hit shader, and without offsets we can't do that.
   // Some map geometry has static decals that are tessellated as odd non-quad meshes, but they still need to be offset,
   // so the second part of this function takes care of that.
   void InstanceManager::applyDecalOffsets(RtInstance& instance, const RasterGeometry& geometryData) {
-    const float offsetIncrement = RtxOptions::Get()->getDecalNormalOffset();
-    if (offsetIncrement == 0.f)
+    if (RtxOptions::Decals::offsetMultiplierMeters() == 0.f) {
       return;
+    }
 
     if (RtxOptions::Get()->isNonOffsetDecalTexture(instance.getMaterialDataHash()))
       return;
 
-    auto getNextOffset = [this, offsetIncrement]() {
-      float offset = float(m_currentDecalIndex) * offsetIncrement;
-
-      // Increment decal index and wrap around to avoid moving them too far away from walls
-      if (++m_currentDecalIndex > c_decalIndexWraparound)
-        m_currentDecalIndex = c_firstDecalIndex;
-
-      return offset;
-    };
-    
     constexpr int indicesPerTriangle = 3;
 
     // Check if this is a supported geometry first
     if (geometryData.indexCount < indicesPerTriangle || geometryData.indexBuffer.indexType() != VK_INDEX_TYPE_UINT16)
       return;
 
-    // Exit if this instnace has already been processed in its current version, to prevent applying offsets to the same geometry multiple times.
+    const bool hasDecalBeenOffset = geometryData.hashes[HashComponents::VertexPosition] == instance.m_lastDecalOffsetVertexDataVersion;
+
+    // Exit if this instance has already been processed in its current version and the decal offset paramterization matches that of the last time it was offset
+    // to prevent applying offsets to the same geometry multiple times.
     // This fixes the chamber information panels in Portal when you reload the same map multiple times in a row.
     // TODO: Move this to geom utils, only do on build
-    if (geometryData.hashes[HashComponents::VertexPosition] == instance.m_lastDecalOffsetVertexDataVersion)
+    if (hasDecalBeenOffset) {
+      // Apply the decal offset difference that was applied to this instance previously to the global offset index 
+      m_currentDecalOffsetIndex += instance.m_currentDecalOffsetDifference
+                                 + RtxOptions::Decals::offsetIndexIncreaseBetweenDrawCalls();
+      if (m_currentDecalOffsetIndex > RtxOptions::Decals::maxOffsetIndex()) {
+        m_currentDecalOffsetIndex = RtxOptions::Decals::baseOffsetIndex();
+      }
       return;
-    instance.m_lastDecalOffsetVertexDataVersion = geometryData.hashes[HashComponents::VertexPosition];
+    }
 
     const GeometryBufferData bufferData(geometryData);
-    
+
     // Check if the necessary buffers exist
     if (!bufferData.indexData || !bufferData.positionData)
       return;
-    
+
+    const bool isSingleOffsetDecalBatch = RtxOptions::isSingleOffsetDecalTexture(instance.getMaterialDataHash());
+    const uint32_t currentOffsetDecalBatchStartIndex = m_currentDecalOffsetIndex;
+    const float offsetMultiplier = RtxOptions::Decals::offsetMultiplierMeters() * RtxOptions::Get()->getMeterToWorldUnitScale();
+
+    auto getNextOffset = [this, &instance, isSingleOffsetDecalBatch, offsetMultiplier]() {
+      const float offset = m_currentDecalOffsetIndex * offsetMultiplier;
+
+      // Increment decal index and wrap it around to avoid moving them too far away from walls
+      if (!isSingleOffsetDecalBatch && ++m_currentDecalOffsetIndex > RtxOptions::Decals::maxOffsetIndex()) {
+        m_currentDecalOffsetIndex = RtxOptions::Decals::baseOffsetIndex();
+      }
+
+      return offset;
+    };
+
     if (RtxOptions::Get()->isDynamicDecalTexture(instance.getMaterialDataHash())) {
-      // It's a dynamic decal. Find all triangle fans and offset each fan individually.
+      // It's a dynamic decal. Find all triangle quads and offset each quad individually.
       int fanStartIndexOffset = 0;
       bool fanNormalFound = false;
       Vector3 normal;
@@ -1714,7 +1731,7 @@ namespace dxvk {
           (bufferData.getIndex(indexOffset + indicesPerTriangle + 1) != indices[2]);
         if (!endOfFan)
           continue;
-        
+
         if (fanNormalFound) {
           // Compute the offset
           const Vector3 positionOffset = normal * getNextOffset();
@@ -1802,6 +1819,29 @@ namespace dxvk {
       }
 
       planeIndices.clear();
+    }
+
+    // Record the geometry hash to mark this decal is offsetted
+    instance.m_lastDecalOffsetVertexDataVersion = geometryData.hashes[HashComponents::VertexPosition];
+
+    // Increment the decal index now if it is a single offset decal batch
+    if (isSingleOffsetDecalBatch) {
+      ++m_currentDecalOffsetIndex;
+    }
+
+    const int32_t currentDecalOffsetDifference = static_cast<int32_t>(m_currentDecalOffsetIndex) - currentOffsetDecalBatchStartIndex;
+
+    // Set to wrap around limit if wrap around (i.e. negative offset index difference is seen) occured
+    instance.m_currentDecalOffsetDifference = instance.m_currentDecalOffsetDifference < 1
+      ? RtxOptions::Decals::maxOffsetIndex()
+      : currentDecalOffsetDifference;
+
+    // We're done processing all the batched decals for the current instance. 
+    // Apply the custom offsetting between decal draw calls.
+    // -1 since the offset index has already been incremented after calculating offset for the previous decal
+    m_currentDecalOffsetIndex += RtxOptions::Decals::offsetIndexIncreaseBetweenDrawCalls() - 1;
+    if (m_currentDecalOffsetIndex > RtxOptions::Decals::maxOffsetIndex()) {
+      m_currentDecalOffsetIndex = RtxOptions::Decals::baseOffsetIndex();
     }
   }
 

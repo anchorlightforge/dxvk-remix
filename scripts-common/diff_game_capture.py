@@ -1,5 +1,6 @@
 import argparse
 import pathlib
+import numpy
 from pxr import Usd
 from enum import Enum
 
@@ -134,23 +135,21 @@ class CaptureDiff:
                 goldenVal = pathlib.Path(str(goldenVal)).name
                 otherVal = "".join(str(goldenVal).split("@"))
                 otherVal = pathlib.Path(str(goldenVal)).name
-            if not CaptureDiff.Attribute.__compareValues(goldenType, goldenVal, otherVal): 
+            if not self.__compareValues(goldenType, goldenVal, otherVal): 
                 self.goldenVal = goldenVal
                 self.otherVal = otherVal
                 return CaptureDiff.Result.Diff
             return CaptureDiff.Result.Success
         
-        @staticmethod
-        def __compareValues(type, goldenVal, otherVal):
+        def __compareValues(self, type, goldenVal, otherVal):
             if type.isArray:
-                return CaptureDiff.Attribute.__compare_array(type, goldenVal, otherVal)
+                return self.__compare_array(type, goldenVal, otherVal)
             else:
-                return CaptureDiff.Attribute.__compare_scalar(type, goldenVal, otherVal)
+                return self.__compare_scalar(type, goldenVal, otherVal)
 
-        @staticmethod
-        def __compare_array(type, goldenArray, otherArray):
-            if not CaptureDiff.Attribute.__is_not_none(goldenArray, otherArray):
-                if CaptureDiff.Attribute.__is_valid_none(goldenArray, otherArray):
+        def __compare_array(self, type, goldenArray, otherArray):
+            if not CaptureDiff.Attribute.__are_not_none(goldenArray, otherArray):
+                if CaptureDiff.Attribute.__are_valid_none(goldenArray, otherArray):
                     return True
                 else:
                     return False
@@ -159,54 +158,50 @@ class CaptureDiff:
             if len(goldenArray) == 0:
                 return True
             bMemberIsArray = False
-            if CaptureDiff.Attribute.__is_py_array(goldenArray[0]) > 0:
+            if CaptureDiff.Attribute.__is_py_array(goldenArray[0]):
                 bMemberIsArray = True
-            for i in range(len(goldenArray)-1):
+            bMembersMatch = True
+            for i in range(len(goldenArray)):
                 if bMemberIsArray:
-                    if not CaptureDiff.Attribute.__compare_array(type, goldenArray[i], otherArray[i]):
-                        return False
-                elif not CaptureDiff.Attribute.__compare_scalar(type, goldenArray[i], otherArray[i]):
-                    return False
-            return True
-        
-        @staticmethod
-        def __is_py_array(goldenArray):
-            return hasattr(goldenArray, "__len__") and not isinstance(goldenArray, str)
-        
-        @staticmethod
-        def __compare_scalar(type, goldenScalar, otherScalar):
-            if not CaptureDiff.Attribute.__is_not_none(goldenScalar, otherScalar):
-                if CaptureDiff.Attribute.__is_valid_none(goldenScalar, otherScalar):
-                    return True
+                    bMembersMatch = bMembersMatch and self.__compare_array(type, goldenArray[i], otherArray[i])
                 else:
-                    return False
-            if type == "float":
-                if not CaptureDiff.Attribute.__float_diff(goldenScalar, otherScalar):
-                    return False
+                    scalarType = str(type).split("[]")[0]
+                    bMembersMatch = bMembersMatch and self.__compare_scalar(scalarType, goldenArray[i], otherArray[i])
+            return bMembersMatch
+        
+        def __compare_scalar(self, type, goldenScalar, otherScalar):
+            if not CaptureDiff.Attribute.__are_not_none(goldenScalar, otherScalar):
+                return CaptureDiff.Attribute.__are_valid_none(goldenScalar, otherScalar)
+            if CaptureDiff.Attribute.__is_float_type(type):
+                return CaptureDiff.Attribute.__float_diff(goldenScalar, otherScalar)
             return goldenScalar == otherScalar
         
         @staticmethod
-        def __is_not_none(golden, other):
-            if golden is not None and other is not None:
-                return True
+        def __is_py_array(array):
+            return hasattr(array, "__len__") and not isinstance(array, str)
+        
+        @staticmethod
+        def __are_not_none(golden, other):
+            return golden is not None and other is not None
 
         @staticmethod
-        def __is_valid_none(golden, other):
-            if golden is None and other is None:
-                return True
-            return False
+        def __are_valid_none(golden, other):
+            return golden is None and other is None
+        
+        @staticmethod
+        def __is_float_type(type):
+            return type == "float" or type == "texCoord2f" or type == "normal3f"
 
         @staticmethod
         def __float_diff(golden, other):
+            if numpy.isnan(golden) or numpy.isnan(other):
+                return numpy.isnan(golden) and numpy.isnan(other)
             absDiff = abs(golden-other)
             if(golden != 0):
-                if absDiff / golden > CaptureDiff.floatTolerance:
-                    return False
-            elif absDiff > CaptureDiff.floatTolerance:
-                return False
-            return True
+                return abs(absDiff / golden) < CaptureDiff.floatTolerance
+            else:
+                return absDiff < CaptureDiff.floatTolerance
 
-    
     def __print_errors(self):
         missingPrims = []
         extraPrims = []
@@ -229,7 +224,7 @@ class CaptureDiff:
         if(len(diffPrims) > 0):
             print("DIFF PRIMS")
             for diffPrim in diffPrims:
-                # print("  " + str(diffPrim.sdfPath))
+                print("  " + str(diffPrim.sdfPath))
                 missingAttrs = []
                 extraAttrs = []
                 diffAttrs = []

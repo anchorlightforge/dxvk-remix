@@ -44,10 +44,10 @@ Texture2D<float4> InColorTexture;
 layout(rgba16f, binding = POST_FX_MOTION_BLUR_OUTPUT)
 RWTexture2D<float4> OutColorTexture;
 
-layout(rgba16f, binding = POST_FX_MOTION_BLUR_NEAREST_SAMPLER)
+layout(binding = POST_FX_MOTION_BLUR_NEAREST_SAMPLER)
 SamplerState NearestSampler;
 
-layout(rgba16f, binding = POST_FX_MOTION_BLUR_LINEAR_SAMPLER)
+layout(binding = POST_FX_MOTION_BLUR_LINEAR_SAMPLER)
 SamplerState LinearSampler;
 
 layout(push_constant)
@@ -110,7 +110,7 @@ bool isValidMotionBlurPixel(const uint2 pixelPos, inout bool isStaticPixel)
   isStaticPixel = motionBlurSurfaceFlags.isStatic;
 
   // Valid motion blur pixels: emissive opaque (if it's enabled by setting), non-ViewModel
-  return (cb.enableMotionBlurEmissive || !motionBlurSurfaceFlags.isEmissive) && (!motionBlurSurfaceFlags.isViewModel);
+  return (cb.enableMotionBlurEmissive || !motionBlurSurfaceFlags.isEmissive) && (!motionBlurSurfaceFlags.isViewModel) && (!motionBlurSurfaceFlags.isMaskOut);
 }
 
 float3 calculatedBlurredColor(

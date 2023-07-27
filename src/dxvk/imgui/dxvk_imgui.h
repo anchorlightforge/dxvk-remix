@@ -39,6 +39,8 @@
 #include "../dxvk_constant_state.h"
 #include "../rtx_render/rtx_options.h"
 
+struct ImPlotContext;
+
 namespace dxvk {
   class ImGuiAbout;
   class ImGuiSplash;
@@ -54,7 +56,7 @@ namespace dxvk {
     
   public:
     
-    ImGUI(const Rc<DxvkDevice>& device, const HWND& hwnd);
+    ImGUI(DxvkDevice* device, const HWND& hwnd);
     
     ~ImGUI();
     
@@ -87,7 +89,7 @@ namespace dxvk {
      * \param [in] hwnd The window handle
      * \returns GUI object, if it was created.
      */
-    static Rc<ImGUI> createGUI(const Rc<DxvkDevice>& device, const HWND& hwnd);
+    static Rc<ImGUI> createGUI(DxvkDevice* device, const HWND& hwnd);
     
     static void AddTexture(const XXH64_hash_t hash, const Rc<DxvkImageView>& imageView);
     static void ReleaseTexture(const XXH64_hash_t hash);
@@ -97,7 +99,7 @@ namespace dxvk {
 
   private:
     
-    const Rc<DxvkDevice>  m_device;
+    DxvkDevice*           m_device;
     
     Rc<DxvkImage>         m_fontTexture;
     Rc<DxvkImageView>     m_fontTextureView;
@@ -108,6 +110,9 @@ namespace dxvk {
     Rc<ImGuiSplash>       m_splash;
     // Note: May be NULL until the font loads, needs to be checked before use.
     ImFont*               m_largeFont = nullptr;
+
+    ImGuiContext*         m_context;
+    ImPlotContext*        m_plotContext;
 
     HWND                  m_hwnd;
     bool                  m_init = false;
@@ -168,7 +173,7 @@ namespace dxvk {
     void showMaterialOptions();
 
     void showEnhancementsWindow(const Rc<DxvkContext>& ctx);
-    void showAppConfig();
+    void showAppConfig(const Rc<DxvkContext>& ctx);
 
     // helper to display a configurable grid of all textures currently hooked to ImGUI
     void showTextureSelectionGrid(const Rc<DxvkContext>& ctx, const char* uniqueId, const uint32_t texturesPerRow, const float thumbnailSize);

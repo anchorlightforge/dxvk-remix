@@ -303,6 +303,8 @@ Rc<ManagedTexture> UsdMod::Impl::getTexture(const Args& args, const pxr::UsdPrim
       auto device = args.context->getDevice();
       auto& textureManager = device->getCommon()->getTextureManager();
       return textureManager.preloadTextureAsset(assetData, colorSpace, args.context, forcePreload);
+    } else if (RtxOptions::Automation::suppressAssetLoadingErrors()) {
+      Logger::warn(str::format("Texture ", resolvedTexturePath, " asset data cannot be found or corrupted."));
     } else {
       Logger::err(str::format("Texture ", resolvedTexturePath, " asset data cannot be found or corrupted."));
     }
@@ -593,6 +595,9 @@ MaterialData* UsdMod::Impl::processMaterial(Args& args, const pxr::UsdPrim& matP
       albedoTexture = TextureRef(getTexture(args, shader, kAlbedoTextureToken, true));
     }
 
+    // We need to use a custom sampler for this texture
+    albedoTexture.sampler = args.context->getDevice()->getCommon()->getResources().getSampler(VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT);
+
     const RayPortalMaterialData rayPortalMaterialData{
       albedoTexture, albedoTexture,
       static_cast<uint8_t>(rayPortalIndex), static_cast<uint8_t>(spriteSheetRows),
@@ -688,7 +693,14 @@ void UsdMod::Impl::processPrim(Args& args, pxr::UsdPrim& prim) {
   static const pxr::TfToken kFaceVertexIndices("faceVertexIndices");
   static const pxr::TfToken kNormals("normals");
   static const pxr::TfToken kPoints("points");
-  static const pxr::TfToken kInvertedUvs("invertedUvs");
+  // We only support one UV parameter at runtime, but in USD the UVs can have multiple names.  We just use the first one that is found from this list.
+  static const pxr::TfToken kUvs[] = {
+    pxr::TfToken("primvars:st"),
+    pxr::TfToken("primvars:uv"),
+    pxr::TfToken("primvars:st0"),
+    pxr::TfToken("primvars:st1"),
+    pxr::TfToken("primvars:st2")
+  };
   static const pxr::TfToken kDoubleSided("doubleSided");
   static const pxr::TfToken kOrientation("orientation");
   static const pxr::TfToken kRightHanded("rightHanded");
@@ -727,7 +739,12 @@ void UsdMod::Impl::processPrim(Args& args, pxr::UsdPrim& prim) {
     prim.GetAttribute(kFaceVertexCounts).Get(&vecFaceCounts);
     prim.GetAttribute(kPoints).Get(&points);
     prim.GetAttribute(kNormals).Get(&normals);
-    prim.GetAttribute(kInvertedUvs).Get(&uvs);
+    for (const pxr::TfToken& uvName : kUvs) {
+      if (prim.HasAttribute(uvName)) {
+        prim.GetAttribute(uvName).Get(&uvs);
+        break;
+      }
+    }
     
     size_t numBones = 0;
     if (prim.HasAPI<pxr::UsdSkelBindingAPI>()) {
@@ -859,7 +876,7 @@ void UsdMod::Impl::processPrim(Args& args, pxr::UsdPrim& prim) {
 
       if (isUVValid) {
         (*pBaseVertexData++) = uvs[i][0];
-        (*pBaseVertexData++) = uvs[i][1];
+        (*pBaseVertexData++) = 1.0 - uvs[i][1];
       }
 
       if (isJointIndicesValid) {
@@ -1196,7 +1213,7 @@ void UsdMod::Impl::processUSD(const Rc<DxvkContext>& context) {
   pxr::UsdStageRefPtr stage = pxr::UsdStage::Open(replacementsUsdPath, pxr::UsdStage::LoadAll);
 
   if (!stage) {
-    Logger::info(str::format("No USD mod files were found, no meshes / materials will be replaced."));
+    Logger::err(str::format("USD mod file failed parsing: ", std::filesystem::weakly_canonical(replacementsUsdPath).string()));
     m_openedFilePath.clear();
     m_fileModificationTime = fs::file_time_type();
     m_owner.setState(State::Unloaded);
@@ -1212,7 +1229,7 @@ void UsdMod::Impl::processUSD(const Rc<DxvkContext>& context) {
   for (size_t i = 0, s = sublayers.size(); i < s; i++) {
     const std::string& identifier = sublayers[i];
     auto layerBasePath = std::filesystem::path(identifier).remove_filename();
-    auto fullLayerBasePath = std::filesystem::weakly_canonical(modBaseDirectory / layerBasePath);
+    auto fullLayerBasePath = modBaseDirectory / layerBasePath;
     AssetDataManager::get().addSearchPath(i, fullLayerBasePath);
   }
 
