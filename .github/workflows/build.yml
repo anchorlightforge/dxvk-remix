@@ -2,7 +2,7 @@ name: Build
 
 on:
   push:
-    branches: [ main ]
+    branches: [ pal4-i204-nullptr-remix ]
   pull_request:
     branches: [ main ]
 
