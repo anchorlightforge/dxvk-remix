@@ -163,7 +163,10 @@ namespace dxvk {
     RW_RTX_OPTION("rtx", fast_unordered_set, worldSpaceUiTextures, {},
                   "Textures on draw calls that should be treated as worldspace UI elements.\n"
                   "Unlike typical UI textures this option is useful for improved rendering of UI elements which appear as part of the scene (moving around in 3D space rather than as a screenspace element).");
-    RW_RTX_OPTION("rtx", fast_unordered_set, worldSpaceUiBackgroundTextures, {}, "");
+    RW_RTX_OPTION("rtx", fast_unordered_set, worldSpaceUiBackgroundTextures, {}, 
+                  "Hack/workaround option for dynamic world space UI textures that are changing in real-time in unpredictable ways."
+                  "Use if the material cannot be reliably determined because it's a dynamic world texture rendered within the UI framework and contains all kinds of UI things."
+                  "Instead of offsetting the texture elements or making them live in unordered TLAS (either of which would solve the problem), we offset the screen background backwards (see Parameter Tuning).");
     RW_RTX_OPTION("rtx", fast_unordered_set, hideInstanceTextures, {},
                   "Textures on draw calls that should be hidden from rendering, but not totally ignored.\n"
                   "This is similar to rtx.ignoreTextures but instead of completely ignoring such draw calls they are only hidden from rendering, allowing for the hidden objects to still appear in captures.\n"
