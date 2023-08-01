@@ -24,6 +24,7 @@
 #include "../dxvk_context.h"
 #include "rtx_resources.h"
 #include "rtx_asset_exporter.h"
+#include "rtx_camera_manager.h"
 #include "rtx/pass/nrd_args.h"
 
 #include <cstdint>
@@ -86,6 +87,8 @@ namespace dxvk {
     void injectRTX(std::uint64_t cachedReflexFrameId, Rc<DxvkImage> targetImage = nullptr);
     void endFrame(std::uint64_t cachedReflexFrameId, Rc<DxvkImage> targetImage = nullptr);
 
+    void onPresent(Rc<DxvkImage> targetImage = nullptr);
+
     /**
       * \brief Set D3D9 specific constant buffers
       *
@@ -116,7 +119,6 @@ namespace dxvk {
   
     static void triggerScreenshot() { s_triggerScreenshot = true; }
     static void triggerUsdCapture() { s_triggerUsdCapture = true; }
-    static const Vector3& getLastCameraPosition() { return s_lastCameraPosition; }
 
     void bindCommonRayTracingResources(const Resources::RaytracingOutput& rtOutput);
 
@@ -127,10 +129,13 @@ namespace dxvk {
     D3D9RtxVertexCaptureData& allocAndMapVertexCaptureConstantBuffer();
     D3D9FixedFunctionVS& allocAndMapFixedFunctionConstantBuffer();
 
-    static bool checkIsShaderExecutionReorderingSupported(Rc<DxvkDevice> device);
+    static bool checkIsShaderExecutionReorderingSupported(DxvkDevice& device);
 
     static bool shouldBakeSky(const DrawCallState& drawCallState);
     static bool shouldBakeTerrain(const DrawCallState& drawCallState);
+
+    const DxvkScInfo& getSpecConstantsInfo(VkPipelineBindPoint pipeline) const;
+    void setSpecConstantsInfo(VkPipelineBindPoint pipeline, const DxvkScInfo& newSpecConstantInfo);
 
   protected:
     virtual void updateComputeShaderResources() override;
@@ -162,10 +167,10 @@ namespace dxvk {
     void dispatchDebugView(Rc<DxvkImage>& srcImage, const Resources::RaytracingOutput& rtOutput, bool captureScreenImage);
     void updateMetrics(const float frameTimeSecs, const float gpuIdleTimeSecs) const;
 
-    void rasterizeToSkyMatte(const DrawParameters& params);
+    void rasterizeToSkyMatte(const DrawParameters& params, float minZ, float maxZ);
     void initSkyProbe();
     void rasterizeToSkyProbe(const DrawParameters& params);
-    bool rasterizeSky(const DrawParameters& params, const DrawCallState& drawCallState);
+    void rasterizeSky(const DrawParameters& params, const DrawCallState& drawCallState);
     void bakeTerrain(const DrawParameters& params, DrawCallState& drawCallState);
 
     uint32_t m_frameLastInjected = kInvalidFrameIndex;
@@ -187,7 +192,7 @@ namespace dxvk {
 
     inline static bool s_triggerScreenshot = false;
     inline static bool s_triggerUsdCapture = false;
-    inline static Vector3 s_lastCameraPosition = 0.f;
+    inline static const bool s_capturePrePresentTestScreenshot = env::getEnvVar("RTX_TAKE_PRE_PRESENT_SCREENSHOT_FRAME") != "";
 
     bool m_rayTracingSupported;
     bool m_dlssSupported;

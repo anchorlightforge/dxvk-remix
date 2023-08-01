@@ -128,6 +128,12 @@ namespace dxvk {
     View,
     World
   };
+  
+  enum class SkyAutoDetectMode : int {
+    None = 0,
+    CameraPosition,
+    CameraPositionAndDepthFlags
+  };
 
   class RtxOptions {
     friend class ImGUI; // <-- we want to modify these values directly.
@@ -157,7 +163,10 @@ namespace dxvk {
     RW_RTX_OPTION("rtx", fast_unordered_set, worldSpaceUiTextures, {},
                   "Textures on draw calls that should be treated as worldspace UI elements.\n"
                   "Unlike typical UI textures this option is useful for improved rendering of UI elements which appear as part of the scene (moving around in 3D space rather than as a screenspace element).");
-    RW_RTX_OPTION("rtx", fast_unordered_set, worldSpaceUiBackgroundTextures, {}, "");
+    RW_RTX_OPTION("rtx", fast_unordered_set, worldSpaceUiBackgroundTextures, {}, 
+                  "Hack/workaround option for dynamic world space UI textures with a coplanar background.
+                  "Apply to backgrounds if the foreground material is a dynamic world texture rendered in UI that is unpredictable and rapidly changing."
+                  "This offsets the background texture backwards.");
     RW_RTX_OPTION("rtx", fast_unordered_set, hideInstanceTextures, {},
                   "Textures on draw calls that should be hidden from rendering, but not totally ignored.\n"
                   "This is similar to rtx.ignoreTextures but instead of completely ignoring such draw calls they are only hidden from rendering, allowing for the hidden objects to still appear in captures.\n"
@@ -177,11 +186,18 @@ namespace dxvk {
     RW_RTX_OPTION("rtx", fast_unordered_set, decalTextures, {},
                   "Textures on draw calls used for static geometric decals or decals with complex topology.\n"
                   "These materials will be blended over the materials underneath them when decal material blending is enabled.\n"
-                  "A small configurable offset is applied to each flat part of these decals to prevent coplanar geometric cases (which poses problems for ray tracing).");
+                  "A small configurable offset is applied to each flat/co-planar part of these decals to prevent coplanar geometric cases (which poses problems for ray tracing).");
     RW_RTX_OPTION("rtx", fast_unordered_set, dynamicDecalTextures, {},
                   "Textures on draw calls used for dynamically spawned geometric decals, such as bullet holes.\n"
                   "These materials will be blended over the materials underneath them when decal material blending is enabled.\n"
-                  "A small configurable offset is applied to each flat part of these decals to prevent coplanar geometric cases (which poses problems for ray tracing).");
+                  "A small configurable offset is applied to each quad part of these decals to prevent coplanar geometric cases (which poses problems for ray tracing).");
+    RW_RTX_OPTION("rtx", fast_unordered_set, singleOffsetDecalTextures, {},
+                  "Textures on draw calls used for geometric decals that don't inter-overlap for a given texture hash. Textures must be tagged as \"Decal Texture\" or \"Dynamic Decal Texture\" to apply.\n"
+                  "Applies a single shared offset to all the batched decal geometry rendered in a given draw call, rather than increasing offset per decal within the batch (i.e. a quad in case of \"Dynamic Decal Texture\").\n"
+                  "Note, the offset adds to the global offset among all decals drawn with different draw calls.\n"
+                  "The decal textures tagged this way must not inter-overlap within a batch / single draw call since the same offset is applied to all of them.\n"
+                  "Applying a single offset is useful for stabilizing decal offsets when a game dynamically batches decals together.\n"
+                  "In addition, it makes the global decal offset index grow slower and thus it minimizes a chance of hitting the \"rtx.decals.maxOffsetIndex limit\".");
     RW_RTX_OPTION("rtx", fast_unordered_set, nonOffsetDecalTextures, {},
                   "Textures on draw calls used for geometric decals with arbitrary topology that are already offset from the base geometry.\n"
                   "These materials will be blended over the materials underneath them when decal material blending is enabled.\n"
@@ -197,6 +213,7 @@ namespace dxvk {
     RW_RTX_OPTION("rtx.antiCulling", fast_unordered_set, antiCullingTextures, {},
                   "[Experimental] Textures that are forced to extend life length when anti-culling is enabled.\n"
                   "Some games use different culling methods we can't fully match, use this option to manually add textures to force extend their life when anti-culling fails.");
+    RW_RTX_OPTION("rtx.postfx", fast_unordered_set, motionBlurMaskOutTextures, {}, "Disable motion blur for meshes with specific texture.");
 
     RW_RTX_OPTION("rtx", std::string, geometryGenerationHashRuleString, "positions,indices,texcoords,geometrydescriptor,vertexlayout,vertexshader",
                   "Defines which asset hashes we need to generate via the geometry processing engine.");
@@ -219,7 +236,7 @@ namespace dxvk {
     RTX_OPTION_FLAG("rtx", bool, keepTexturesForTagging, false, RtxOptionFlags::NoSave, "A flag to keep all textures in video memory, which can drastically increase VRAM consumption. Intended to assist with tagging textures that are only used for a short period of time (such as loading screens). Use only when necessary!");
 
     RTX_OPTION("rtx", bool, skipDrawCallsPostRTXInjection, false, "Ignores all draw calls recorded after RTX Injection, the location of which varies but is currently based on when tagged UI textures begin to draw.");
-    RTX_OPTION("rtx", DlssPreset, dlssPreset, DlssPreset::On, "Combined DLSS Preset for quickly controlling Upscaling, Frame Interpolation and Latency Reduction.");
+    RTX_OPTION_ENV("rtx", DlssPreset, dlssPreset, DlssPreset::On, "RTX_DLSS_PRESET", "Combined DLSS Preset for quickly controlling Upscaling, Frame Interpolation and Latency Reduction.");
     RTX_OPTION("rtx", NisPreset, nisPreset, NisPreset::Balanced, "Adjusts NIS scaling factor, trades quality for performance.");
     RTX_OPTION("rtx", TaauPreset, taauPreset, TaauPreset::Balanced,  "Adjusts TAA-U scaling factor, trades quality for performance.");
     RTX_OPTION_ENV("rtx", GraphicsPreset, graphicsPreset, GraphicsPreset::Auto, "DXVK_GRAPHICS_PRESET_TYPE", "Overall rendering preset, higher presets result in higher image quality, lower presets result in better performance.");
@@ -248,6 +265,7 @@ namespace dxvk {
       RTX_OPTION("rtx.viewModel", float, scale, 1.0f, "Scale for view models. Minimize to prevent clipping.");
       RTX_OPTION("rtx.viewModel", bool, enableVirtualInstances, true, "If true, virtual instances are created to render the view models behind a portal.");
       RTX_OPTION("rtx.viewModel", bool, perspectiveCorrection, true, "If true, apply correction to view models (e.g. different FOV is used for view models).");
+      RTX_OPTION("rtx.viewModel", float, maxZThreshold, 0.0f, "If a draw call's viewport has max depth less than or equal to this threshold, then assume that it's a view model.");
     } viewModel;
 
   public:
@@ -270,10 +288,10 @@ namespace dxvk {
     RTX_OPTION("rtx", uint32_t, maxPrimsInMergedBLAS, 50000, "");
 
     // Camera
-    RTX_OPTION("rtx", bool, shakeCamera, false, "");
-    RTX_OPTION("rtx", CameraAnimationMode, cameraAnimationMode, CameraAnimationMode::CameraShake_Pitch, "");
-    RTX_OPTION("rtx", int, cameraShakePeriod, 20, "");
-    RTX_OPTION("rtx", float, cameraAnimationAmplitude, 2.0f, "");
+    RTX_OPTION_ENV("rtx", bool, shakeCamera, false, "RTX_FREE_CAMERA_ENABLE_ANIMATION", "Enables animation of the free camera.");
+    RTX_OPTION_ENV("rtx", CameraAnimationMode, cameraAnimationMode, CameraAnimationMode::CameraShake_Pitch, "RTX_FREE_CAMERA_ANIMATION_MODE", "Free camera's animation mode.");
+    RTX_OPTION_ENV("rtx", int, cameraShakePeriod, 20, "RTX_FREE_CAMERA_ANIMATION_PERIOD", "Period of the free camera's animation.");
+    RTX_OPTION_ENV("rtx", float, cameraAnimationAmplitude, 2.0f, "RTX_FREE_CAMERA_ANIMATION_AMPLITUDE", "Amplitude of the free camera's animation.");
     RTX_OPTION("rtx", bool, skipObjectsWithUnknownCamera, false, "");
     RTX_OPTION("rtx", bool, enableNearPlaneOverride, false,
                "A flag to enable or disable the Camera's near plane override feature.\n"
@@ -302,11 +320,11 @@ namespace dxvk {
     RTX_OPTION("rtx", bool, zUp, false, "Indicates that the Z axis is the \"upward\" axis in the world when true, otherwise the Y axis when false.");
     RTX_OPTION("rtx", bool, isLHS, false, "");
     RTX_OPTION("rtx", float, uniqueObjectDistance, 300.f, "[cm]");
-    RTX_OPTION_FLAG("rtx", UIType, showUI, UIType::None, RtxOptionFlags::NoSave | RtxOptionFlags::NoReset, "0 = Don't Show, 1 = Show Simple, 2 = Show Advanced.");
+    RTX_OPTION_FLAG_ENV("rtx", UIType, showUI, UIType::None, RtxOptionFlags::NoSave | RtxOptionFlags::NoReset, "RTX_GUI_DISPLAY_UI", "0 = Don't Show, 1 = Show Simple, 2 = Show Advanced.");
     RTX_OPTION_FLAG("rtx", bool, defaultToAdvancedUI, false, RtxOptionFlags::NoReset, "");
     RTX_OPTION("rtx", bool, showUICursor, true, "");
     RTX_OPTION_FLAG("rtx", bool, blockInputToGameInUI, true, RtxOptionFlags::NoSave, "");
-    RTX_OPTION("rtx", bool, hideSplashMessage, false,
+    RTX_OPTION_ENV("rtx", bool, hideSplashMessage, false, "RTX_HIDE_SPLASH_MESSAGE",
                "A flag to disable the splash message indicating how to use Remix from appearing when the application starts.\n"
                "When set to true this message will be hidden, otherwise it will be displayed on every launch.");
   private:
@@ -501,7 +519,22 @@ namespace dxvk {
                "A global scale factor applied to the albedo of decals that are applied to a translucent base material, to make the decals more visible.\n"
                "This is generally needed as albedo values for decals may be fairly low when dealing with opaque surfaces, but the translucent diffuse layer requires a fairly high albedo value to result in an expected look.\n"
                "The need for this option could be avoided by simply authoring decals applied to translucent materials with a higher albedo to begin with, but sometimes applications may share decals between different material types.");
-    RTX_OPTION("rtx", float, decalNormalOffset, 0.003f, "Distance along normal to offset between two adjacent decals to prevent coplanar rendering issues such as Z-fighting.");
+
+    struct Decals {
+      friend class RtxOptions;
+      friend class ImGUI;
+
+      RTX_OPTION("rtx.decals", float, offsetMultiplierMeters, 0.00003f, 
+                 "[meters] Distance along a normal to offset between two adjacent decal offset indices to prevent coplanar rendering issues such as Z-fighting.\n"
+                 "This value is multiplied by a decal offset index. The value should be kept small so as not make decals appear floating in front of their target backgrounds.");
+      RTX_OPTION("rtx.decals", uint32_t, baseOffsetIndex, 1, "Offset index of a first decal.");
+      RTX_OPTION("rtx.decals", uint32_t, maxOffsetIndex, 256, 
+                 "Max decal offset index. The offset index wraps around when this value is reached and is set to baseOffsetIndex again.\n"
+                 "The value should be kept small so as not to offset decals too far from their target backgrounds.");
+      RTX_OPTION("rtx.decals", uint32_t, offsetIndexIncreaseBetweenDrawCalls, 1, "Index offset increase between decal draw calls. This can be useful to increase if default index of 1 is not enough to move decals from different draw calls apart enough.");
+
+    };
+
     RTX_OPTION("rtx", float, worldSpaceUiBackgroundOffset, -0.01f, "Distance along normal to offset objects rendered as worldspace UI, specifically for the background of screens.");
 
     // Light Selection/Sampling Options
@@ -779,6 +812,13 @@ namespace dxvk {
     RTX_OPTION("rtx", uint32_t, skyProbeSide, 1024, "");
     RTX_OPTION_FLAG("rtx", uint32_t, skyUiDrawcallCount, 0, RtxOptionFlags::NoSave, "");
     RTX_OPTION("rtx", uint32_t, skyDrawcallIdThreshold, 0, "It's common in games to render the skybox first, and so, this value provides a simple mechanism to identify those early draw calls that are untextured (textured draw calls can still use the Sky Textures functionality.");
+    RTX_OPTION("rtx", float, skyMinZThreshold, 1.f, "If a draw call's viewport has min depth greater than or equal to this threshold, then assume that it's a sky.");
+    RTX_OPTION("rtx", SkyAutoDetectMode, skyAutoDetect, SkyAutoDetectMode::None, 
+               "Automatically tag sky draw calls using various heuristics.\n"
+               "0 = None\n"
+               "1 = CameraPosition - assume the first seen camera position is a sky camera.\n"
+               "2 = CameraPositionAndDepthFlags - assume the first seen camera position is a sky camera, if its draw call's depth test is disabled. If it's enabled, assume no sky camera.\n"
+               "Note: if all draw calls are marked as sky, then assume that there's no sky camera at all.");
 
     // TODO (REMIX-656): Remove this once we can transition content to new hash
     RTX_OPTION("rtx", bool, logLegacyHashReplacementMatches, false, "");
@@ -791,9 +831,20 @@ namespace dxvk {
     RTX_OPTION("rtx", bool, alwaysCopyDecalGeometries, true, "When set to True tells the geometry processor to always copy decals geometry. This is an optimization flag to experiment with when rtx.useBuffersDirectly is True.");
 
     // Automation Options
-    RTX_OPTION_ENV("rtx.automation", bool, disableBlockingDialogBoxes, false, "DXVK_AUTOMATION_DISABLE_BLOCKING_DIALOG_BOXES",
-                   "Disables various blocking blocking dialog boxes (such as popup windows) requiring user interaction when set to true, otherwise uses default behavior when set to false.\n"
-                   "This option is typically meant for automation-driven execution of Remix where such dialog boxes if present may cause the application to hang due to blocking waiting for user input.");
+    struct Automation {
+      RTX_OPTION_FLAG_ENV("rtx.automation", bool, disableBlockingDialogBoxes, false, RtxOptionFlags::NoSave, "RTX_AUTOMATION_DISABLE_BLOCKING_DIALOG_BOXES",
+                          "Disables various blocking blocking dialog boxes (such as popup windows) requiring user interaction when set to true, otherwise uses default behavior when set to false.\n"
+                          "This option is typically meant for automation-driven execution of Remix where such dialog boxes if present may cause the application to hang due to blocking waiting for user input.");
+      RTX_OPTION_FLAG_ENV("rtx.automation", bool, disableDisplayMemoryStatistics, false, RtxOptionFlags::NoSave, "RTX_AUTOMATION_DISABLE_DISPLAY_MEMORY_STATISTICS",
+                          "Disables display of memory statistics in the Remix window.\n"
+                          "This option is typically meant for automation of tests for which we don't want non-deterministic runtime memory statistics to be shown in GUI that is included as part of test image output.");
+      RTX_OPTION_FLAG_ENV("rtx.automation", bool, disableUpdateUpscaleFromDlssPreset, false, RtxOptionFlags::NoSave, "RTX_AUTOMATION_DISABLE_UPDATE_UPSCALER_FROM_DLSS_PRESET",
+                          "Disables updating upscaler from DLSS preset.\n"
+                          "This option is typically meant for automation of tests for which we don't want upscaler to be updated based on a DLSS preset.");
+      RTX_OPTION_FLAG_ENV("rtx.automation", bool, suppressAssetLoadingErrors, false, RtxOptionFlags::NoSave, "RTX_AUTOMATION_SUPPRESS_ASSET_LOADING_ERRORS",
+                          "Suppresses asset loading errors by turning them into warnings.\n"
+                          "This option is typically meant for automation of tests for which acceptable asset loading issues are known.");
+    };
 
   public:
     LegacyMaterialDefaults legacyMaterial;
@@ -1102,6 +1153,10 @@ namespace dxvk {
       return dynamicDecalTextures().find(h) != dynamicDecalTextures().end();
     }
 
+    static bool isSingleOffsetDecalTexture(const XXH64_hash_t& h) {
+      return singleOffsetDecalTextures().find(h) != singleOffsetDecalTextures().end();
+    }
+
     bool isNonOffsetDecalTexture(const XXH64_hash_t& h) const {
       return nonOffsetDecalTextures().find(h) != nonOffsetDecalTextures().end();
     }
@@ -1116,6 +1171,10 @@ namespace dxvk {
 
     bool isAnimatedWaterTexture(const XXH64_hash_t& h) const {
       return animatedWaterTextures().find(h) != animatedWaterTextures().end();
+    }
+
+    bool isMotionBlurMaskOutTexture(const XXH64_hash_t& h) const {
+      return motionBlurMaskOutTextures().find(h) != motionBlurMaskOutTextures().end();
     }
 
     bool isAntiCullingTexture(const XXH64_hash_t& h) const {
@@ -1187,13 +1246,6 @@ namespace dxvk {
     RenderPassIntegrateDirectRaytraceMode getRenderPassIntegrateDirectRaytraceMode() const { return renderPassIntegrateDirectRaytraceMode(); }
     RenderPassIntegrateIndirectRaytraceMode getRenderPassIntegrateIndirectRaytraceMode() const { return renderPassIntegrateIndirectRaytraceMode(); }
 
-    // View Model
-    bool isViewModelEnabled() const { return viewModel.enable(); }
-    float getViewModelRangeMeters() const { return viewModel.rangeMeters(); }
-    float getViewModelScale() const { return viewModel.scale(); }
-    bool isViewModelVirtualInstancesEnabled() const { return viewModel.enableVirtualInstances(); }
-    bool isViewModelPerspectiveCorrectionEnabled() const { return viewModel.perspectiveCorrection(); }
-
     // Resolve Options
     uint8_t getPrimaryRayMaxInteractions() const { return primaryRayMaxInteractions(); }
     uint8_t getPSRRayMaxInteractions() const { return psrRayMaxInteractions(); }
@@ -1228,7 +1280,6 @@ namespace dxvk {
     bool isUnorderedResolveInIndirectRaysEnabled() const { return enableUnorderedResolveInIndirectRays(); }
     bool isDecalMaterialBlendingEnabled() const { return enableDecalMaterialBlending(); }
     float getTranslucentDecalAlbedoFactor() const { return translucentDecalAlbedoFactor(); }
-    float getDecalNormalOffset() const { return decalNormalOffset(); }
     float getRussianRouletteMaxContinueProbability() const { return russianRouletteMaxContinueProbability(); }
     float getRussianRoulette1stBounceMinContinueProbability() const { return russianRoulette1stBounceMinContinueProbability(); }
     float getRussianRoulette1stBounceMaxContinueProbability() const { return russianRoulette1stBounceMaxContinueProbability(); }

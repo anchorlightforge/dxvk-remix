@@ -57,6 +57,7 @@ public:
   const XXH64_hash_t& getMaterialHash() const { return m_materialHash; }
   const XXH64_hash_t& getMaterialDataHash() const { return m_materialDataHash; }
   const XXH64_hash_t& getTexcoordHash() const { return m_texcoordHash; }
+  const XXH64_hash_t& getIndexHash() const { return m_indexHash; }
   Matrix4 getTransform() const { return transpose(dxvk::Matrix4(m_vkInstance.transform)); }
   const Matrix4& getPrevTransform() const { return surface.prevObjectToWorld; }
   Vector3 getWorldPosition() const { return { m_vkInstance.transform.matrix[0][3], m_vkInstance.transform.matrix[1][3], m_vkInstance.transform.matrix[2][3] }; }
@@ -152,14 +153,18 @@ private:
   bool m_objectToWorldMirrored = false;
   bool m_isCreatedByRenderer = false;
   BlasEntry* m_linkedBlas = nullptr;
-  XXH64_hash_t m_materialHash = 0;
-  XXH64_hash_t m_materialDataHash = 0;
-  XXH64_hash_t m_texcoordHash = 0;
+  XXH64_hash_t m_materialHash = kEmptyHash;
+  XXH64_hash_t m_materialDataHash = kEmptyHash;
+  XXH64_hash_t m_texcoordHash = kEmptyHash;
+  XXH64_hash_t m_indexHash = kEmptyHash;
   VkAccelerationStructureInstanceKHR m_vkInstance;
   VkGeometryFlagsKHR m_geometryFlags = 0;
   uint32_t m_firstBillboard = 0;
   uint32_t m_billboardCount = 0;
-  uint64_t m_lastDecalOffsetVertexDataVersion = 0;
+
+  // Used decal offsetting parameters
+  XXH64_hash_t m_lastDecalOffsetVertexDataVersion = kEmptyHash;
+  uint32_t m_currentDecalOffsetDifference = UINT32_MAX;
 
 public:
 
@@ -207,13 +212,12 @@ struct IntersectionBillboard {
 
 // InstanceManager is responsible for maintaining the active set of scene instances
 //  and the GPU buffers which are required by VK for instancing.
-class InstanceManager
-{
+class InstanceManager : public CommonDeviceObject {
 public:
   InstanceManager(InstanceManager const&) = delete;
   InstanceManager& operator=(InstanceManager const&) = delete;
 
-  InstanceManager(Rc<DxvkDevice> device, ResourceCache* pResourceCache);
+  InstanceManager(DxvkDevice* device, ResourceCache* pResourceCache);
   ~InstanceManager();
 
   // Return a list of instances currently active in the scene
@@ -275,18 +279,11 @@ private:
   std::vector<RtInstance*> m_playerModelInstances;
   std::vector<IntersectionBillboard> m_billboards;
 
-  Rc<DxvkDevice> m_device;
   bool m_previousViewModelState = false;
   RtInstance* targetInstance = nullptr;
 
-  // The "index" is just a multiplier for the offset that is applied to each decal along normal.
-  // Index of 1 means the offset is "rtx.decalNormalOffset" units, 2 is double that, etc.
-  // Start with 1 so that all decals receive at least some offset, to handle cases when they are coplanar with walls.
-  static constexpr uint32_t c_firstDecalIndex = 1;
-  // This is the maximum value of m_currentDecalIndex after which it is reset back to c_firstDecalIndex.
-  static constexpr uint32_t c_decalIndexWraparound = 64;
-  uint32_t m_currentDecalIndex = c_firstDecalIndex;
-  
+  uint32_t m_currentDecalOffsetIndex;
+    
   // Controls active portal space for which virtual view model or player model instances have been generated for.
   // Negative values mean there is no portal that's close enough to the camera.
   int m_virtualInstancePortalIndex = 0;    
@@ -297,7 +294,7 @@ private:
   void mergeInstanceHeuristics(RtInstance& instanceToModify, const DrawCallState& drawCall, const RtSurfaceMaterial& material, const RtSurface::AlphaState& alphaState) const;
 
   // Finds the "closest" matching instance to a set of inputs, returns a pointer (can be null if not found) to closest instance
-  RtInstance* findSimilarInstance(const BlasEntry& blas, const DrawCallState& drawCall, const RtSurfaceMaterial& material, const Matrix4& transform, const CameraManager& cameraManager, const RayPortalManager& rayPortalManager);
+  RtInstance* findSimilarInstance(const BlasEntry& blas, const RtSurfaceMaterial& material, const Matrix4& transform, CameraType::Enum cameraType, const RayPortalManager& rayPortalManager);
 
   RtInstance* addInstance(BlasEntry& blas, const DrawCallState& drawCall, const RtSurfaceMaterial& material, const Matrix4& transform);
   void processInstanceBuffers(const BlasEntry& blas, RtInstance& currentInstance) const;
