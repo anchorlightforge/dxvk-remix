@@ -1674,7 +1674,7 @@ namespace dxvk {
         }
 
         if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 3.1: Hide Instance Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->hideInstanceTexturesDescription())) {
-          showTextureSelectionGrid(ctx, "hideinstancetextures", numThumbnailsPerRow, thumbnailSize);
+          showTextureSelectionGrid(ctx, "hidetextures", numThumbnailsPerRow, thumbnailSize);
         }
         if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 3.2: Lightmap Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->lightmapTexturesDescription())) {
           showTextureSelectionGrid(ctx, "lightmaptextures", numThumbnailsPerRow, thumbnailSize);
