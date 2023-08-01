@@ -1742,8 +1742,6 @@ namespace dxvk {
         if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 10.2: Opacity Micromap Ignore Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->opacityMicromapIgnoreTexturesDescription())) {
           showTextureSelectionGrid(ctx, "opacitymicromapignoretextures", numThumbnailsPerRow, thumbnailSize);
         }
-
-
       }
     }
 
@@ -1813,7 +1811,6 @@ namespace dxvk {
     }
 
     showMaterialOptions();
-
 
     ImGui::PopItemWidth();
   }
