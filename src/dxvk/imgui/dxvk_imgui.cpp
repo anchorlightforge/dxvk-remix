@@ -1448,7 +1448,7 @@ namespace dxvk {
       }
     }
 
-    const ImVec2 availableSize = ImGui::GetContentRegionAvail() - isListFiltered ? ImGuiStyle::IndentSpacing : 0;
+    const ImVec2 availableSize = new ImVec2(ImGui::GetContentRegionAvail().x - isListFiltered ? ImGuiStyle::IndentSpacing : 0, ImGui::GetContentRegionAvail().y);
     const float childWindowHeight = availableSize.y < 600 ? 600 : availableSize.y;
     ImGuiWindowFlags window_flags = ImGuiWindowFlags_None;
     ImGui::BeginChild(str::format("Child", uniqueId).c_str(), ImVec2(availableSize.x, childWindowHeight), false, window_flags);
