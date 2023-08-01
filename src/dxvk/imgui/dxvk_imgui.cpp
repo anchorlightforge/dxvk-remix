@@ -1447,11 +1447,12 @@ namespace dxvk {
         break;
       }
     }
+    //GetContentRegionAvail() does not account for ImGui::Indent resulting in a cutoff on indented texture lists; textureGuiAvailableSize calculates the difference when appropriate
     const ImVec2 availableSize = ImGui::GetContentRegionAvail();
     const float textureGuiAvailableSize = isListFiltered ? (availableSize.x - ImGui::GetStyle().IndentSpacing) : availableSize.x;
     const float childWindowHeight = availableSize.y < 600 ? 600 : availableSize.y;
     ImGuiWindowFlags window_flags = ImGuiWindowFlags_None;
-    ImGui::BeginChild(str::format("Child", uniqueId).c_str(), ImVec2(textureGuiAvailableSize, childWindowHeight), false, window_flags);
+    ImGui::BeginChild(str::format("Child", uniqueId).c_str(), ImVec2(availableSize.x, childWindowHeight), false, window_flags);
 
     static char textureInfo[1024];
 
@@ -1655,10 +1656,14 @@ namespace dxvk {
       else {
         ImGui::Indent();
         if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("UI Textures", collapsingHeaderClosedFlags), RtxOptions::Get()->uiTexturesDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "uitextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
+
         }
 
         if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Worldspace UI Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->worldSpaceUiTexturesDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "worldspaceuitextures", numThumbnailsPerRow, thumbnailSize);
         }
 
