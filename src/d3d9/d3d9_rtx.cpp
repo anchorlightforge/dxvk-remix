@@ -337,8 +337,7 @@ namespace dxvk {
 
       std::vector<D3DLIGHT9> activeLightsRT;
       uint32_t lightIdx = 0;
-      for (uint32_t i = 0; i < caps::MaxEnabledLights; i++) {
-        auto idx = d3d9State().enabledLightIndices[i];
+      for (auto idx : d3d9State().enabledLightIndices) {
         if (idx == UINT32_MAX)
           continue;
         activeLightsRT.push_back(d3d9State().lights[idx].value());
@@ -593,21 +592,33 @@ namespace dxvk {
     // Hash material data
     m_activeDrawCallState.materialData.updateCachedHash();
 
-    // When skybox geometries are defined, we don't know if we will or won't need the draw call ahead of time, so assume we do
-    bool hasDrawDependencies = (RtxOptions::Get()->skyBoxGeometries().size() != 0) 
-                             || RtxContext::shouldBakeSky(m_activeDrawCallState) 
-                             || RtxContext::shouldBakeTerrain(m_activeDrawCallState);
-
-    bool preserveOriginalDraw = hasDrawDependencies || status == RtxGeometryStatus::Rasterized;
-
     // For shader based drawcalls we also want to capture the vertex shader output
-    if (m_parent->UseProgrammableVS() && useVertexCapture()) {
+    const bool needVertexCapture = m_parent->UseProgrammableVS() && useVertexCapture();
+    if (needVertexCapture) {
       prepareVertexCapture(vertexIndexOffset);
-      preserveOriginalDraw = true;
     }
 
     m_activeDrawCallState.usesVertexShader = m_parent->UseProgrammableVS();
     m_activeDrawCallState.usesPixelShader = m_parent->UseProgrammablePS();
+
+    m_activeDrawCallState.cameraType = CameraType::Unknown;
+
+    m_activeDrawCallState.minZ = std::clamp(d3d9State().viewport.MinZ, 0.0f, 1.0f);
+    m_activeDrawCallState.maxZ = std::clamp(d3d9State().viewport.MaxZ, 0.0f, 1.0f);
+
+    m_activeDrawCallState.zWriteEnable = d3d9State().renderStates[D3DRS_ZWRITEENABLE];
+    m_activeDrawCallState.alphaBlendEnable = d3d9State().renderStates[D3DRS_ALPHABLENDENABLE];
+    m_activeDrawCallState.zEnable = d3d9State().renderStates[D3DRS_ZENABLE] == D3DZB_TRUE;
+
+    // Note: when skybox geometries are defined, we don't know if we will or won't need the draw call ahead of time, so assume we do
+    // Same with automatic sky detection (requires camera data)
+    const bool preserveOriginalDraw =
+      status == RtxGeometryStatus::Rasterized ||
+      needVertexCapture ||
+      !RtxOptions::skyBoxGeometries().empty() ||
+      RtxOptions::skyAutoDetect() != SkyAutoDetectMode::None ||
+      RtxContext::shouldBakeSky(m_activeDrawCallState) ||
+      RtxContext::shouldBakeTerrain(m_activeDrawCallState);
 
     return { preserveOriginalDraw, true };
   }
@@ -1007,5 +1018,10 @@ namespace dxvk {
     m_drawCallID = 0;
 
     m_stagedBonesCount = 0;
+  }
+
+  void D3D9Rtx::OnPresent(const Rc<DxvkImage>& targetImage) {
+    // Inform backend of present
+    m_parent->EmitCs([targetImage](DxvkContext* ctx) { static_cast<RtxContext*>(ctx)->onPresent(targetImage); });
   }
 }

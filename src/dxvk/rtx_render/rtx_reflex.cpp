@@ -61,7 +61,7 @@ namespace dxvk {
   // Reflex uses global variables for PCL init, so if a game uses multiple devices, we need to ensure we only do PCL init once.
   static std::atomic<std::uint32_t> s_initPclRefcount = 0;
 
-  RtxReflex::RtxReflex(DxvkDevice* device) : m_device(device) {
+  RtxReflex::RtxReflex(DxvkDevice* device) : CommonDeviceObject(device) {
     // Initialize PCL stats
     // Note: PCL stats are always desired even if Reflex itself is disabled, so this is done before any checks for Reflex enablement/support.
 
@@ -137,9 +137,13 @@ namespace dxvk {
   }
 
   void RtxReflex::sleep() const {
-    // Early out if Reflex was not initialized or if the Reflex mode is set to None
+    // Early out if Reflex was not initialized
+    // Note: This Reflex sleep code is run even when the Reflex mode is set to None as this is the recommendation from the
+    // Reflex team as the API expects the sleep function to be called even in this case. Do note however that this does have
+    // a very slight performance cost which is why previously an early out was done here when the Reflex mode was set to None,
+    // though it is nothing major though that'd affect the framerate (at least in current testing).
 
-    if (!reflexInitialized() || RtxOptions::Get()->reflexMode() == ReflexMode::None) {
+    if (!reflexInitialized()) {
       return;
     }
 
@@ -148,7 +152,7 @@ namespace dxvk {
     // Query semaphore
 
     uint64_t signalValue = 0;
-    vkGetSemaphoreCounterValue(vkd->device(), m_lowLatencySemaphore, &signalValue);
+    vkd->vkGetSemaphoreCounterValue(vkd->device(), m_lowLatencySemaphore, &signalValue);
     signalValue += 1;
 
     // Sleep
@@ -170,7 +174,7 @@ namespace dxvk {
 
     if (status == NVLL_VK_OK) {
       ScopedCpuProfileZoneN("Reflex_WaitSemaphore");
-      vkWaitSemaphores(vkd->device(), &semaphoreWaitInfo, 500000000);
+      vkd->vkWaitSemaphores(vkd->device(), &semaphoreWaitInfo, 500000000);
     } else {
       Logger::warn(str::format("Unable to invoke Reflex sleep function: ", NvLLStatusToString(status)));
     }

@@ -1043,6 +1043,10 @@ namespace dxvk {
       if (m_imgui != nullptr)
         m_imgui->render(m_window, m_context, info.format, info.imageExtent);
 
+      // NV-DXVK start
+      m_parent->m_rtx.OnPresent(m_imageViews.at(imageIndex)->image());
+      // NV-DXVK end
+
       if (i + 1 >= SyncInterval)
         m_context->signal(m_frameLatencySignal, m_frameId);
 
@@ -1294,7 +1298,7 @@ namespace dxvk {
 
   void D3D9SwapChainEx::CreateHud() {
     m_hud = hud::Hud::createHud(m_device);
-    m_imgui = ImGUI::createGUI(m_device, m_window);
+    m_imgui = ImGUI::createGUI(m_device.ptr(), m_window);
 
     if (m_hud != nullptr) {
       m_hud->addItem<hud::HudClientApiItem>("api", 1, GetApiName());
@@ -1315,6 +1319,8 @@ namespace dxvk {
 
 
   void D3D9SwapChainEx::SyncFrameLatency() {
+    ScopedCpuProfileZone();
+
     // Wait for the sync event so that we respect the maximum frame latency
     m_frameLatencySignal->wait(m_frameId - GetActualFrameLatency());
   }

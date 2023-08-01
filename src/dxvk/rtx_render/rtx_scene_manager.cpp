@@ -45,8 +45,8 @@
 
 namespace dxvk {
 
-  SceneManager::SceneManager(Rc<DxvkDevice> device)
-    : m_device(device)
+  SceneManager::SceneManager(DxvkDevice* device)
+    : CommonDeviceObject(device)
     , m_instanceManager(device, this)
     , m_accelManager(device)
     , m_lightManager(device)
@@ -54,7 +54,7 @@ namespace dxvk {
     , m_drawCallCache(device)
     , m_bindlessResourceManager(device)
     , m_volumeManager(device)
-    , m_pReplacer(new AssetReplacer(device))
+    , m_pReplacer(new AssetReplacer())
     , m_terrainBaker(new TerrainBaker())
     , m_gameCapturer(new GameCapturer(*this, device->getCommon()->metaExporter()))
     , m_cameraManager(device)
@@ -282,7 +282,11 @@ namespace dxvk {
     m_rayPortalManager.garbageCollection();
   }
 
-  void SceneManager::destroy() {
+  void SceneManager::onDestroy() {
+    m_accelManager.onDestroy();
+    if (m_opacityMicromapManager) {
+      m_opacityMicromapManager->onDestroy();
+    }
   }
 
   template<bool isNew>
@@ -440,6 +444,10 @@ namespace dxvk {
       m_terrainBaker->onFrameEnd(m_device->getCurrentFrameId());
   }
 
+  void SceneManager::onFrameEndNoRTX() {
+    m_cameraManager.onFrameEnd();
+  }
+
   std::unordered_set<XXH64_hash_t> uniqueHashes;
 
 
@@ -454,14 +462,6 @@ namespace dxvk {
     if (m_fog.mode == D3DFOG_NONE && input.getFogState().mode != D3DFOG_NONE) {
       m_fog = input.getFogState();
     }
-
-    // Check if a any camera data requires processing
-    const bool cameraCut = m_cameraManager.processCameraData(input);
-
-    // Skip objects with an unknown camera
-    if (m_cameraManager.getLastSetCameraType() == CameraType::Unknown &&
-        RtxOptions::Get()->getSkipObjectsWithUnknownCamera())
-      return;
 
     // Get Material and Mesh replacements
     // NOTE: Next refactor we move this into a material manager

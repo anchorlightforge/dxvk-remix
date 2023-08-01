@@ -152,11 +152,13 @@ namespace dxvk {
     {"lightconvertertextures", "Add Light to Textures (optional)", &RtxOptions::Get()->lightConverterObject()},
     {"decaltextures", "Decal Texture (optional)", &RtxOptions::Get()->decalTexturesObject()},
     {"dynamicdecaltextures", "Dynamic Decal Texture", &RtxOptions::Get()->dynamicDecalTexturesObject()},
+    {"singleoffsetdecaltextures", "Single Offset Decal Texture", &RtxOptions::Get()->singleOffsetDecalTexturesObject()},
     {"nonoffsetdecaltextures", "Non-Offset Decal Texture", &RtxOptions::Get()->nonOffsetDecalTexturesObject()},
     {"cutouttextures", "Legacy Cutout Texture (optional)", &RtxOptions::Get()->cutoutTexturesObject()},
     {"terraintextures", "Terrain Texture", &RtxOptions::Get()->terrainTexturesObject()},
     {"watertextures", "Water Texture (optional)", &RtxOptions::Get()->animatedWaterTexturesObject()},
     {"antiCullingTextures", "Anti-Culling Texture (optional)", &RtxOptions::Get()->antiCullingTexturesObject()},
+    {"motionBlurMaskOutTextures", "Motion Blur Mask-Out Textures (optional)", &RtxOptions::Get()->motionBlurMaskOutTexturesObject()},
     {"playermodeltextures", "Player Model Texture (optional)", &RtxOptions::Get()->playerModelTexturesObject()},
     {"playermodelbodytextures", "Player Model Body Texture (optional)", &RtxOptions::Get()->playerModelBodyTexturesObject()},
     {"opacitymicromapignoretextures", "Opacity Micromap Ignore Texture (optional)", &RtxOptions::Get()->opacityMicromapIgnoreTexturesObject()}
@@ -290,6 +292,14 @@ namespace dxvk {
       {FusedWorldViewMode::World, "In World Transform"},
   } });
 
+  static auto skyAutoDetectCombo = ImGui::ComboWithKey<SkyAutoDetectMode>(
+    "Sky Auto-Detect",
+    ImGui::ComboWithKey<SkyAutoDetectMode>::ComboEntries{ {
+      {SkyAutoDetectMode::None, "Off"},
+      {SkyAutoDetectMode::CameraPosition, "By Camera Position"},
+      {SkyAutoDetectMode::CameraPositionAndDepthFlags, "By Camera Position and Depth Flags"}
+  } });
+
   // Styles 
   constexpr ImGuiSliderFlags sliderFlags = ImGuiSliderFlags_AlwaysClamp;
   constexpr ImGuiTreeNodeFlags collapsingHeaderClosedFlags = ImGuiTreeNodeFlags_CollapsingHeader;
@@ -297,7 +307,7 @@ namespace dxvk {
   constexpr ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus;
   constexpr ImGuiWindowFlags popupWindowFlags = ImGuiWindowFlags_NoSavedSettings;
 
-  ImGUI::ImGUI(const Rc<DxvkDevice>& device, const HWND& hwnd)
+  ImGUI::ImGUI(DxvkDevice* device, const HWND& hwnd)
   : m_device (device)
   , m_hwnd   (hwnd)
   , m_about  (new ImGuiAbout)
@@ -357,8 +367,11 @@ namespace dxvk {
     m_device->vkd()->vkCreateDescriptorPool(m_device->handle(), &pool_info, nullptr, &m_imguiPool);
 
     // Initialize the core structures of ImGui and ImPlot
-    ImGui::CreateContext();
-    ImPlot::CreateContext();
+    m_context = ImGui::CreateContext();
+    m_plotContext = ImPlot::CreateContext();
+
+    ImGui::SetCurrentContext(m_context);
+    ImPlot::SetCurrentContext(m_plotContext);
 
     // Initialize imgui for SDL
     ImGui_ImplWin32_Init(hwnd);
@@ -372,6 +385,11 @@ namespace dxvk {
   }
 
   ImGUI::~ImGUI() {
+    g_imguiTextureMap.clear();
+
+    ImGui::SetCurrentContext(m_context);
+    ImPlot::SetCurrentContext(m_plotContext);
+
     ImGui_ImplWin32_Shutdown();
 
     //add the destroy the imgui created structures
@@ -390,8 +408,8 @@ namespace dxvk {
     }
 
     // Destroy the ImGui and ImPlot context
-    ImPlot::DestroyContext();
-    ImGui::DestroyContext();
+    ImPlot::DestroyContext(m_plotContext);
+    ImGui::DestroyContext(m_context);
   }
   
   void ImGUI::AddTexture(const XXH64_hash_t hash, const Rc<DxvkImageView>& imageView) {
@@ -413,10 +431,15 @@ namespace dxvk {
   }
 
   void ImGUI::wndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    ImGui::SetCurrentContext(m_context);
     ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam);
   }
 
   void ImGUI::showMemoryStats() const {
+    if (RtxOptions::Automation::disableDisplayMemoryStatistics()) {
+      return;
+    }
+
     // Gather runtime vidmem stats
     VkDeviceSize vidmemSize = 0;
     VkDeviceSize vidmemUsedSize = 0;
@@ -771,7 +794,7 @@ namespace dxvk {
               m_about->show(ctx);
               break;
             case Tabs::kDevelopment:
-              showAppConfig();
+              showAppConfig(ctx);
               break;
             }
             ImGui::EndTabItem();
@@ -1249,7 +1272,7 @@ namespace dxvk {
     }
   }
 
-  void ImGUI::showAppConfig() {
+  void ImGUI::showAppConfig(const Rc<DxvkContext>& ctx) {
     ImGui::PushItemWidth(250);
     if (ImGui::Button("Take Screenshot")) {
       RtxContext::triggerScreenshot();
@@ -1296,10 +1319,57 @@ namespace dxvk {
     if (ImGui::CollapsingHeader("Camera", collapsingHeaderFlags)) {
       ImGui::Indent();
 
-      const Vector3& cameraPosition = RtxContext::getLastCameraPosition();
-      ImGui::Text("Camera at: %.2f %.2f %.2f", cameraPosition.x, cameraPosition.y, cameraPosition.z);
-
       RtCamera::showImguiSettings();
+
+      {
+        ImGui::PushID("CameraInfos");
+        auto& cameraManager = ctx->getCommonObjects()->getSceneManager().getCameraManager();
+        if (ImGui::CollapsingHeader("Types", collapsingHeaderClosedFlags)) {
+          ImGui::Indent();
+          constexpr static std::pair<CameraType::Enum, const char*> cameras[] = {
+            { CameraType::Main,      "Main" },
+            { CameraType::ViewModel, "ViewModel" },
+            { CameraType::Portal0,   "Portal0" },
+            { CameraType::Portal1,   "Portal1" },
+            { CameraType::Sky,       "Sky" },
+          };
+          // C++20: should be static_assert with std::ranges::find_if
+          assert(
+            std::find_if(
+              std::begin(cameras),
+              std::end(cameras),
+              [](const auto& p) { return p.first == CameraType::Unknown; })
+            == std::end(cameras));
+          static_assert(std::size(cameras) == CameraType::Count - 1);
+
+          static auto printCamera = [](const char* name, const RtCamera* c) {
+            if (ImGui::CollapsingHeader(name, collapsingHeaderFlags)) {
+              ImGui::Indent();
+              if (c) {
+                ImGui::Text("Position: %.2f %.2f %.2f", c->getPosition().x, c->getPosition().y, c->getPosition().z);
+                ImGui::Text("Direction: %.2f %.2f %.2f", c->getDirection().x, c->getDirection().y, c->getDirection().z);
+                ImGui::Text("Vertical FOV: %.1f", c->getFov() * kRadiansToDegrees);
+                ImGui::Text("Near / Far plane: %.1f / %.1f", c->getNearPlane(), c->getFarPlane());
+                ImGui::Text(c->isLHS() ? "Left-handed" : "Right-handed");
+              } else {
+                ImGui::Text("Position: -");
+                ImGui::Text("Direction: -");
+                ImGui::Text("Vertical FOV: -");
+                ImGui::Text("Near / Far plane: -");
+                ImGui::Text("-");
+              }
+              ImGui::Unindent();
+            }
+          };
+
+          for (const auto& [type, name] : cameras) {
+            printCamera(name, cameraManager.isCameraValid(type) ? &cameraManager.getCamera(type) : nullptr);
+          }
+          ImGui::Text("3D sky detected: %s", cameraManager.was3DSkyInPrevFrame() ? "Yes" : "No");
+          ImGui::Unindent();
+        }
+        ImGui::PopID();
+      }
 
       if (ImGui::CollapsingHeader("Camera Animation", collapsingHeaderClosedFlags)) {
         ImGui::Checkbox("Animate Camera", &RtxOptions::Get()->shakeCameraObject());
@@ -1577,7 +1647,101 @@ namespace dxvk {
     ImGui::Checkbox("Preserve discarded textures", &RtxOptions::Get()->keepTexturesForTaggingObject());
 
     if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 1: Categorize Textures", collapsingHeaderClosedFlags), "Select texture definitions for Remix")) {
-      showTextureSelectionGrid(ctx, "textures", numThumbnailsPerRow, thumbnailSize);
+
+      ImGui::Checkbox("Split Texture Category List", &showLegacyTextureGuiObject());
+
+      if (!showLegacyTextureGui()) {
+        showTextureSelectionGrid(ctx, "textures", numThumbnailsPerRow, thumbnailSize);
+      }
+      else {
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 1: UI Textures", collapsingHeaderClosedFlags), RtxOptions::Get()->uiTexturesDescription())) {
+          showTextureSelectionGrid(ctx, "uitextures", numThumbnailsPerRow, thumbnailSize);
+        }
+
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 1.2: Worldspace UI Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->worldSpaceUiTexturesDescription())) {
+          showTextureSelectionGrid(ctx, "worldspaceuitextures", numThumbnailsPerRow, thumbnailSize);
+        }
+
+        if (ImGui::CollapsingHeader("Step 3: Sky Parameters (optional)", collapsingHeaderClosedFlags)) {
+          ImGui::Indent();
+
+          if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Sky Textures", collapsingHeaderClosedFlags), RtxOptions::Get()->skyBoxTexturesDescription())) {
+            showTextureSelectionGrid(ctx, "skytextures", numThumbnailsPerRow, thumbnailSize);
+          }
+
+          ImGui::Unindent();
+        }
+
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 4: Ignore Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->ignoreTexturesDescription())) {
+          showTextureSelectionGrid(ctx, "ignoretextures", numThumbnailsPerRow, thumbnailSize);
+        }
+
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 5: Ignore Lights (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->ignoreLightsDescription())) {
+          showTextureSelectionGrid(ctx, "ignorelights", numThumbnailsPerRow, thumbnailSize);
+        }
+
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 6: Particle Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->particleTexturesDescription())) {
+          showTextureSelectionGrid(ctx, "particletextures", numThumbnailsPerRow, thumbnailSize);
+        }
+
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 6.1: Beam Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->beamTexturesDescription())) {
+          showTextureSelectionGrid(ctx, "beamtextures", numThumbnailsPerRow, thumbnailSize);
+        }
+
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 6.2: Add Lights to Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->lightConverterDescription())) {
+          showTextureSelectionGrid(ctx, "lightconvertertextures", numThumbnailsPerRow, thumbnailSize);
+        }
+
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 7: Decal Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->decalTexturesDescription())) {
+          showTextureSelectionGrid(ctx, "decaltextures", numThumbnailsPerRow, thumbnailSize);
+        }
+
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 7.1: Dynamic Decal Textures", collapsingHeaderClosedFlags), RtxOptions::Get()->dynamicDecalTexturesDescription())) {
+          showTextureSelectionGrid(ctx, "dynamicdecaltextures", numThumbnailsPerRow, thumbnailSize);
+        }
+
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 7.2: Single Offset Decal Textures", collapsingHeaderClosedFlags), RtxOptions::Get()->singleOffsetDecalTexturesDescription())) {
+          showTextureSelectionGrid(ctx, "singleoffsetdecaltextures", numThumbnailsPerRow, thumbnailSize);
+        }
+
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 7.3: Non-Offset Decal Textures", collapsingHeaderClosedFlags), RtxOptions::Get()->nonOffsetDecalTexturesDescription())) {
+          showTextureSelectionGrid(ctx, "nonoffsetdecaltextures", numThumbnailsPerRow, thumbnailSize);
+        }
+
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 8.1: Legacy Cutout Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->cutoutTexturesDescription())) {
+          ImGui::DragFloat("Force Cutout Alpha", &RtxOptions::Get()->forceCutoutAlphaObject(), 0.01f, 0.0f, 1.0f, "%.3f", sliderFlags);
+          showTextureSelectionGrid(ctx, "cutouttextures", numThumbnailsPerRow, thumbnailSize);
+        }
+
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 8.2: Terrain Textures", collapsingHeaderClosedFlags), RtxOptions::Get()->terrainTexturesDescription())) {
+          showTextureSelectionGrid(ctx, "terraintextures", numThumbnailsPerRow, thumbnailSize);
+        }
+
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 8.3: Water Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->animatedWaterTexturesDescription())) {
+          showTextureSelectionGrid(ctx, "watertextures", numThumbnailsPerRow, thumbnailSize);
+        }
+
+        if (RtxOptions::AntiCulling::Object::enable() &&
+          IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 8.4: Anti-Culling Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->antiCullingTexturesDescription())) {
+          showTextureSelectionGrid(ctx, "antiCullingTextures", numThumbnailsPerRow, thumbnailSize);
+        }
+
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 8.5: Motion Blur Mask-Out Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->motionBlurMaskOutTexturesDescription())) {
+          showTextureSelectionGrid(ctx, "motionBlurMaskOutTextures", numThumbnailsPerRow, thumbnailSize);
+        }
+
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 9.1: Player Model Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->playerModelTexturesDescription())) {
+          showTextureSelectionGrid(ctx, "playermodeltextures", numThumbnailsPerRow, thumbnailSize);
+        }
+
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 9.2: Player Model Body Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->playerModelBodyTexturesDescription())) {
+          showTextureSelectionGrid(ctx, "playermodelbodytextures", numThumbnailsPerRow, thumbnailSize);
+        }
+
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 10: Opacity Micromap Ignore Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->opacityMicromapIgnoreTexturesDescription())) {
+          showTextureSelectionGrid(ctx, "opacitymicromapignoretextures", numThumbnailsPerRow, thumbnailSize);
+        }
+      }
     }
 
     if (ImGui::CollapsingHeader("Step 2: Parameter Tuning", collapsingHeaderClosedFlags)) {
@@ -1605,10 +1769,11 @@ namespace dxvk {
 
       if (ImGui::CollapsingHeader("View Model", collapsingHeaderClosedFlags)) {
         ImGui::Indent();
-        ImGui::Checkbox("Enable View Model", &RtxOptions::Get()->viewModel.enableObject());
-        ImGui::Checkbox("Virtual Instances", &RtxOptions::Get()->viewModel.enableVirtualInstancesObject());
-        ImGui::Checkbox("Perspective Correction", &RtxOptions::Get()->viewModel.perspectiveCorrectionObject());
-        ImGui::DragFloat("Scale", &RtxOptions::Get()->viewModel.scaleObject(), 0.01f, 0.01f, 2.0f);
+        ImGui::Checkbox("Enable View Model", &RtxOptions::ViewModel::enableObject());
+        ImGui::SliderFloat("Max Z Threshold", &RtxOptions::ViewModel::maxZThresholdObject(), 0.0f, 1.0f);
+        ImGui::Checkbox("Virtual Instances", &RtxOptions::ViewModel::enableVirtualInstancesObject());
+        ImGui::Checkbox("Perspective Correction", &RtxOptions::ViewModel::perspectiveCorrectionObject());
+        ImGui::DragFloat("Scale", &RtxOptions::ViewModel::scaleObject(), 0.01f, 0.01f, 2.0f);
         ImGui::Unindent();
       }
 
@@ -1616,6 +1781,8 @@ namespace dxvk {
         ImGui::Indent();
         ImGui::DragFloat("Sky Brightness", &RtxOptions::Get()->skyBrightnessObject(), 0.01f, 0.01f, FLT_MAX, "%.3f", sliderFlags);
         ImGui::InputInt("First N untextured drawcalls", &RtxOptions::Get()->skyDrawcallIdThresholdObject(), 1, 1, 0);
+        ImGui::SliderFloat("Sky Min Z Threshold", &RtxOptions::Get()->skyMinZThresholdObject(), 0.0f, 1.0f);
+        skyAutoDetectCombo.getKey(&RtxOptions::Get()->skyAutoDetectObject());
 
         if (ImGui::CollapsingHeader("Advanced", collapsingHeaderClosedFlags)) {
           ImGui::Checkbox("Force HDR sky", &RtxOptions::Get()->skyForceHDRObject());
@@ -1639,88 +1806,6 @@ namespace dxvk {
     }
 
     showMaterialOptions();
-
-    if (showLegacyTextureGui()) {
-      if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 1: UI Textures", collapsingHeaderClosedFlags), RtxOptions::Get()->uiTexturesDescription())) {
-        showTextureSelectionGrid(ctx, "uitextures", numThumbnailsPerRow, thumbnailSize);
-      }
-
-      if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 1.2: Worldspace UI Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->worldSpaceUiTexturesDescription())) {
-        showTextureSelectionGrid(ctx, "worldspaceuitextures", numThumbnailsPerRow, thumbnailSize);
-      }
-
-      if (ImGui::CollapsingHeader("Step 3: Sky Parameters (optional)", collapsingHeaderClosedFlags)) {
-        ImGui::Indent();
-
-        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Sky Textures", collapsingHeaderClosedFlags), RtxOptions::Get()->skyBoxTexturesDescription())) {
-          showTextureSelectionGrid(ctx, "skytextures", numThumbnailsPerRow, thumbnailSize);
-        }
-
-        ImGui::Unindent();
-      }
-
-      if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 4: Ignore Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->ignoreTexturesDescription())) {
-        showTextureSelectionGrid(ctx, "ignoretextures", numThumbnailsPerRow, thumbnailSize);
-      }
-
-      if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 5: Ignore Lights (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->ignoreLightsDescription())) {
-        showTextureSelectionGrid(ctx, "ignorelights", numThumbnailsPerRow, thumbnailSize);
-      }
-
-      if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 6: Particle Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->particleTexturesDescription())) {
-        showTextureSelectionGrid(ctx, "particletextures", numThumbnailsPerRow, thumbnailSize);
-      }
-
-      if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 6.1: Beam Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->beamTexturesDescription())) {
-        showTextureSelectionGrid(ctx, "beamtextures", numThumbnailsPerRow, thumbnailSize);
-      }
-
-      if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 6.2: Add Lights to Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->lightConverterDescription())) {
-        showTextureSelectionGrid(ctx, "lightconvertertextures", numThumbnailsPerRow, thumbnailSize);
-      }
-
-      if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 7: Decal Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->decalTexturesDescription())) {
-        showTextureSelectionGrid(ctx, "decaltextures", numThumbnailsPerRow, thumbnailSize);
-      }
-
-      if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 7.1: Dynamic Decal Textures", collapsingHeaderClosedFlags), RtxOptions::Get()->dynamicDecalTexturesDescription())) {
-        showTextureSelectionGrid(ctx, "dynamicdecaltextures", numThumbnailsPerRow, thumbnailSize);
-      }
-
-      if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 7.2: Non-Offset Decal Textures", collapsingHeaderClosedFlags), RtxOptions::Get()->nonOffsetDecalTexturesDescription())) {
-        showTextureSelectionGrid(ctx, "nonoffsetdecaltextures", numThumbnailsPerRow, thumbnailSize);
-      }
-
-      if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 8.1: Legacy Cutout Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->cutoutTexturesDescription())) {
-        ImGui::DragFloat("Force Cutout Alpha", &RtxOptions::Get()->forceCutoutAlphaObject(), 0.01f, 0.0f, 1.0f, "%.3f", sliderFlags);
-        showTextureSelectionGrid(ctx, "cutouttextures", numThumbnailsPerRow, thumbnailSize);
-      }
-
-      if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 8.2: Terrain Textures", collapsingHeaderClosedFlags), RtxOptions::Get()->terrainTexturesDescription())) {
-        showTextureSelectionGrid(ctx, "terraintextures", numThumbnailsPerRow, thumbnailSize);
-      }
-
-      if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 8.3: Water Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->animatedWaterTexturesDescription())) {
-        showTextureSelectionGrid(ctx, "watertextures", numThumbnailsPerRow, thumbnailSize);
-      }
-
-      if (RtxOptions::AntiCulling::Object::enable() &&
-        IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 8.4: Anti-Culling Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->antiCullingTexturesDescription())) {
-        showTextureSelectionGrid(ctx, "antiCullingTextures", numThumbnailsPerRow, thumbnailSize);
-      }
-
-      if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 9.1: Player Model Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->playerModelTexturesDescription())) {
-        showTextureSelectionGrid(ctx, "playermodeltextures", numThumbnailsPerRow, thumbnailSize);
-      }
-
-      if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 9.2: Player Model Body Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->playerModelBodyTexturesDescription())) {
-        showTextureSelectionGrid(ctx, "playermodelbodytextures", numThumbnailsPerRow, thumbnailSize);
-      }
-
-      if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 10: Opacity Micromap Ignore Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->opacityMicromapIgnoreTexturesDescription())) {
-        showTextureSelectionGrid(ctx, "opacitymicromapignoretextures", numThumbnailsPerRow, thumbnailSize);
-      }
-    }
 
     ImGui::PopItemWidth();
   }
@@ -2325,12 +2410,26 @@ namespace dxvk {
 
     if (ImGui::CollapsingHeader("Geometry", collapsingHeaderClosedFlags)) {
       ImGui::Indent();
+
       ImGui::Checkbox("Enable Triangle Culling (Globally)", &RtxOptions::Get()->enableCullingObject());
       ImGui::Checkbox("Enable Triangle Culling (Override Secondary Rays)", &RtxOptions::Get()->enableCullingInSecondaryRaysObject());
       ImGui::Separator();
       ImGui::DragInt("Min Prims in Static BLAS", &RtxOptions::Get()->minPrimsInStaticBLASObject(), 1.f, 100, 0);
       ImGui::Checkbox("Portals: Virtual Instance Matching", &RtxOptions::Get()->useRayPortalVirtualInstanceMatchingObject());
       ImGui::Checkbox("Portals: Fade In Effect", &RtxOptions::Get()->enablePortalFadeInEffectObject());
+      
+      if (ImGui::CollapsingHeader("Decals", collapsingHeaderClosedFlags)) {
+        ImGui::Indent();
+
+        ImGui::TextWrapped("Warning: changes to these parameters will only apply to new geometry. Existing geometry needs to be invalidated by either a game reload or gameplay and/or camera view change if the game uses runtime or view dependent geometry batching per draw call.");
+
+        ImGui::DragFloat("Offset Multiplier [m]", &RtxOptions::Decals::offsetMultiplierMetersObject(), 0.0001f, 0.f, 0.f, "%.5f");
+        ImGui::DragInt("Base Offset Index", &RtxOptions::Decals::baseOffsetIndexObject(), 1.f, 1, 1000);
+        ImGui::DragInt("Max Offset Index", &RtxOptions::Decals::maxOffsetIndexObject(), 1.f, 1, 10000);
+        ImGui::DragInt("Offset Increase Between Decal Draw Calls", &RtxOptions::Decals::offsetIndexIncreaseBetweenDrawCallsObject(), 1.f, 1, 1000);
+        ImGui::Unindent();
+      }
+
       ImGui::Unindent();
     }
 
@@ -2389,8 +2488,6 @@ namespace dxvk {
         ImGui::DragFloat("Max Anisotropy Samples", &RtxOptions::Get()->maxAnisotropySamplesObject(), 0.5f, 1.0f, 16.f, "%.3f", sliderFlags);
       }
       ImGui::DragFloat("Translucent Decal Albedo Factor", &RtxOptions::Get()->translucentDecalAlbedoFactorObject(), 0.01f);
-      ImGui::DragFloat("Decal Normal Offset", &RtxOptions::Get()->decalNormalOffsetObject(), 0.0001f, 0.f, 0.f, "%.4f");
-
       ImGui::Unindent();
     }
 
@@ -2422,6 +2519,9 @@ namespace dxvk {
     VkSurfaceFormatKHR surfaceFormat,
     VkExtent2D        surfaceSize) {
     ScopedGpuProfileZone(ctx, "ImGUI Render");
+
+    ImGui::SetCurrentContext(m_context);
+    ImPlot::SetCurrentContext(m_plotContext);
 
     // Sometimes games can change windows on us, so we need to check that here and tell ImGUI
     if (m_hwnd != hwnd) {
@@ -2461,7 +2561,7 @@ namespace dxvk {
     this->resetRendererState(ctx);
   }
   
-  Rc<ImGUI> ImGUI::createGUI(const Rc<DxvkDevice>& device, const HWND& hwnd) {
+  Rc<ImGUI> ImGUI::createGUI(DxvkDevice* device, const HWND& hwnd) {
     return new ImGUI(device, hwnd);
   }
 
