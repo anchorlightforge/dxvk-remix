@@ -164,8 +164,8 @@ namespace dxvk {
                   "Textures on draw calls that should be treated as worldspace UI elements.\n"
                   "Unlike typical UI textures this option is useful for improved rendering of UI elements which appear as part of the scene (moving around in 3D space rather than as a screenspace element).");
     RW_RTX_OPTION("rtx", fast_unordered_set, worldSpaceUiBackgroundTextures, {}, 
-                  "Hack/workaround option for dynamic world space UI textures with a coplanar background.
-                  "Apply to backgrounds if the foreground material is a dynamic world texture rendered in UI that is unpredictable and rapidly changing."
+                  "Hack/workaround option for dynamic world space UI textures with a coplanar background.\n"
+                  "Apply to backgrounds if the foreground material is a dynamic world texture rendered in UI that is unpredictable and rapidly changing.\n"
                   "This offsets the background texture backwards.");
     RW_RTX_OPTION("rtx", fast_unordered_set, hideInstanceTextures, {},
                   "Textures on draw calls that should be hidden from rendering, but not totally ignored.\n"
