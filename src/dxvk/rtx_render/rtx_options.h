@@ -326,9 +326,12 @@ namespace dxvk {
                "When set to true this message will be hidden, otherwise it will be displayed on every launch.");
   private:
     VirtualKeys m_remixMenuKeyBinds;
+    VirtualKeys m_toggleEnhancementsKeyBinds;
+    VirtualKeys m_takeScreenshotKeyBinds;
   public:
     const VirtualKeys& remixMenuKeyBinds() const { return m_remixMenuKeyBinds; }
-
+    const VirtualKeys& toggleEnhancementsKeyBinds() const { return m_toggleEnhancementsKeyBinds; }
+    const VirtualKeys& takeScreenshotKeyBinds() const { return m_takeScreenshotKeyBinds; }
     RTX_OPTION("rtx", DLSSProfile, qualityDLSS, DLSSProfile::Auto, "Adjusts internal DLSS scaling factor, trades quality for performance.");
     // Note: All ray tracing modes depend on the rtx.raytraceModePreset option as they may be overridden by automatic defaults for a specific vendor if the preset is set to Auto. Set
     // to Custom to ensure these settings are not overridden.
@@ -1049,11 +1052,19 @@ namespace dxvk {
         enableReplacementMaterialsRef() = false;
       }
 
-      const VirtualKeys& kDefaultRemixMenuKeyBinds { VirtualKey{VK_MENU},VirtualKey{'X'} };
-      m_remixMenuKeyBinds = options.getOption<VirtualKeys>("rtx.remixMenuKeyBinds", kDefaultRemixMenuKeyBinds);
-
+      // Geometry hash rules
       GeometryHashGenerationRule = createRule("Geometry generation", geometryGenerationHashRuleString());
       GeometryAssetHashRule = createRule("Geometry asset", geometryAssetHashRuleString());
+      
+      // Keybindings and shortcuts
+      const VirtualKeys& kDefaultRemixMenuKeyBinds { VirtualKey{VK_MENU},VirtualKey{'X'} };
+      m_remixMenuKeyBinds = options.getOption<VirtualKeys>("rtx.remixMenuKeyBinds", kDefaultRemixMenuKeyBinds);
+      const VirtualKeys& kDefaultToggleEnhancementsKeyBinds { VirtualKey{VK_CONTROL},VirtualKey{VK_SHIFT},VirtualKey{'T'}};
+      m_toggleEnhancementsKeyBinds = options.getOption<VirtualKeys>("rtx.toggleEnhancementsKeyBinds", kDefaultToggleEnhancementsKeyBinds);
+      const VirtualKeys& kDefaultTakeScreenshotKeyBinds { VirtualKey{VK_MENU},VirtualKey{VK_F12} };
+      m_takeScreenshotKeyBinds = options.getOption<VirtualKeys>("rtx.takeScreenshotKeyBinds", kDefaultTakeScreenshotKeyBinds);
+    }
+
     }
 
     void updateUpscalerFromDlssPreset();
@@ -1367,6 +1378,7 @@ namespace dxvk {
     bool getEnableOpacityMicromap() const { return opacityMicromap.enable() && opacityMicromap.isSupported; }
     void setEnableOpacityMicromap(bool enabled) { opacityMicromap.enableRef() = enabled; }
 
+    bool getEnableReplacementAssets() { return enableReplacementAssets(); }
     bool getEnableAnyReplacements() { return enableReplacementAssets() && (enableReplacementLights() || enableReplacementMeshes() || enableReplacementMaterials()); }
     bool getEnableReplacementLights() { return enableReplacementAssets() && enableReplacementLights(); }
     bool getEnableReplacementMeshes() { return enableReplacementAssets() && enableReplacementMeshes(); }

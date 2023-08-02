@@ -612,16 +612,29 @@ namespace dxvk {
     }
   }
 
-  void ImGUI::processHotkeys() {
+  void ImGUI::processHotkeys(const Rc<DxvkContext>& ctx) {
     auto& io = ImGui::GetIO();
     auto& opts = *RtxOptions::Get();
 
-    if (checkHotkeyState(RtxOptions::Get()->remixMenuKeyBinds())) {
-      if(opts.defaultToAdvancedUI()) {
+    if (checkHotkeyState(opts.remixMenuKeyBinds())) {
+      if (opts.defaultToAdvancedUI()) {
         switchMenu(opts.showUI() != UIType::None ? UIType::None : UIType::Advanced);
       } else {
         switchMenu(opts.showUI() != UIType::None ? UIType::None : UIType::Basic);
       }
+    }
+
+    if (checkHotkeyState(opts.toggleEnhancementsKeyBinds()))
+    {
+      auto common = ctx->getCommonObjects();
+      if(common->getSceneManager().areReplacementsLoaded())
+      {
+        opts.enableReplacementAssetsObject() = !opts.getEnableReplacementAssets();
+      }
+    }
+    if (checkHotkeyState(RtxOptions::Get()->takeScreenshotKeyBinds())) {
+      RtxContext::triggerScreenshot();
+      //Todo: Add ImGui message pointing to screenshot directory
     }
 
     // Toggle ImGUI mouse cursor. Alt-Del
@@ -653,7 +666,7 @@ namespace dxvk {
 
     ImGui::NewFrame();
 
-    processHotkeys();
+    processHotkeys(ctx);
     updateQuickActions(ctx);
 
     m_splash->update(m_largeFont);

@@ -2,7 +2,7 @@ name: Build
 
 on:
   push:
-    branches: [ main ]
+    branches: [ hotkeys-testing ]
   pull_request:
     branches: [ main ]
 
