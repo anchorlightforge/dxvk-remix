@@ -1638,7 +1638,7 @@ namespace dxvk {
   void ImGUI::showSetupWindow(const Rc<DxvkContext>& ctx) {
     ImGui::PushItemWidth(200);
 
-    const float thumbnailScale = &RtxOptions::Get()->getTextureGridThumbnailScale();
+    const float thumbnailScale = RtxOptions::Get()->getTextureGridThumbnailScale();
     const float thumbnailSize = (120.f * thumbnailScale);
     const float thumbnailSpacing = ImGui::GetStyle().ItemSpacing.x;
     const float thumbnailPadding = ImGui::GetStyle().CellPadding.x;
