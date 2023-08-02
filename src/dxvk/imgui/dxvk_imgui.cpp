@@ -1647,7 +1647,7 @@ namespace dxvk {
 
     if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 1: Categorize Textures", collapsingHeaderClosedFlags), "Select texture definitions for Remix")) {
       ImGui::Checkbox("Split Texture Category List", &showLegacyTextureGuiObject());
-      ImGui::DragFloat("Texture Thumbnail Scale", &RtxOptions::Get()->textureGridThumbnailScaleObject(), 0.1f, 2f, FLT_MAX, "%.3f", sliderFlags);
+      ImGui::DragFloat("Texture Thumbnail Scale", &RtxOptions::Get()->textureGridThumbnailScaleObject(), 0.25f, 0.25f, 3.f, "%.2f", sliderFlags);
       ImGui::Separator();
       if (!showLegacyTextureGui()) {
         showTextureSelectionGrid(ctx, "textures", numThumbnailsPerRow, thumbnailSize);
