@@ -1065,7 +1065,7 @@ namespace dxvk {
       m_takeScreenshotKeyBinds = options.getOption<VirtualKeys>("rtx.takeScreenshotKeyBinds", kDefaultTakeScreenshotKeyBinds);
     }
 
-    }
+    };
 
     void updateUpscalerFromDlssPreset();
     void updateUpscalerFromNisPreset();
