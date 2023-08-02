@@ -2,7 +2,7 @@ name: Build
 
 on:
   push:
-    branches: [ imgui-texture-interface-rev2 ]
+    branches: [ main ]
   pull_request:
     branches: [ main ]
 
