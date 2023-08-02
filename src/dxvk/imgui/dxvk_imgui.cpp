@@ -1447,9 +1447,7 @@ namespace dxvk {
         break;
       }
     }
-    //GetContentRegionAvail() does not account for ImGui::Indent resulting in a cutoff on indented texture lists; textureGuiAvailableSize calculates the difference when appropriate
     const ImVec2 availableSize = ImGui::GetContentRegionAvail();
-    const float textureGuiAvailableSize = isListFiltered ? (availableSize.x - ImGui::GetStyle().IndentSpacing) : availableSize.x;
     const float childWindowHeight = availableSize.y < 600 ? 600 : availableSize.y;
     ImGuiWindowFlags window_flags = ImGuiWindowFlags_None;
     ImGui::BeginChild(str::format("Child", uniqueId).c_str(), ImVec2(availableSize.x, childWindowHeight), false, window_flags);
@@ -1665,88 +1663,129 @@ namespace dxvk {
         if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Worldspace UI Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->worldSpaceUiTexturesDescription())) {
           ImGui::Unindent();
           showTextureSelectionGrid(ctx, "worldspaceuitextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
 
         if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Worldspace UI Background Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->worldSpaceUiBackgroundTexturesDescription())) {
           ImGui::DragFloat("Worldspace UI Background Offset", &RtxOptions::Get()->worldSpaceUiBackgroundOffsetObject(), 0.01f, 0.01f, FLT_MAX, "%.3f", sliderFlags);
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "worldspaceuibackgroundtextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
 
         if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Sky Textures", collapsingHeaderClosedFlags), RtxOptions::Get()->skyBoxTexturesDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "skytextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
 
         if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Ignore Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->ignoreTexturesDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "ignoretextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
 
         if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Hide Instance Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->hideInstanceTexturesDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "hidetextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
         if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Lightmap Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->lightmapTexturesDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "lightmaptextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
 
         if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Ignore Lights (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->ignoreLightsDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "ignorelights", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
 
         if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Particle Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->particleTexturesDescription())) {
+          ImGui::Unindent(); 
           showTextureSelectionGrid(ctx, "particletextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
 
         if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Beam Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->beamTexturesDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "beamtextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
 
         if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Add Lights to Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->lightConverterDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "lightconvertertextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
 
         if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Decal Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->decalTexturesDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "decaltextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
 
         if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Dynamic Decal Textures", collapsingHeaderClosedFlags), RtxOptions::Get()->dynamicDecalTexturesDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "dynamicdecaltextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
 
         if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Non-Offset Decal Textures", collapsingHeaderClosedFlags), RtxOptions::Get()->nonOffsetDecalTexturesDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "nonoffsetdecaltextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
 
         if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Legacy Cutout Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->cutoutTexturesDescription())) {
           ImGui::DragFloat("Force Cutout Alpha", &RtxOptions::Get()->forceCutoutAlphaObject(), 0.01f, 0.0f, 1.0f, "%.3f", sliderFlags);
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "cutouttextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
 
         if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Terrain Textures", collapsingHeaderClosedFlags), RtxOptions::Get()->terrainTexturesDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "terraintextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
 
         if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Water Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->animatedWaterTexturesDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "watertextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent(); 
         }
 
         if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Player Model Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->playerModelTexturesDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "playermodeltextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent(); 
         }
 
         if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Player Model Body Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->playerModelBodyTexturesDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "playermodelbodytextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
 
         if (RtxOptions::AntiCulling::Object::enable() &&
           IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Anti-Culling Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->antiCullingTexturesDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "antiCullingTextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
 
         if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Motion Blur Mask-Out Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->motionBlurMaskOutTexturesDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "motionBlurMaskOutTextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent(); 
         }
 
         if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Opacity Micromap Ignore Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->opacityMicromapIgnoreTexturesDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "opacitymicromapignoretextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
         ImGui::Unindent();
       }
