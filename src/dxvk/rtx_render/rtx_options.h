@@ -1242,7 +1242,6 @@ namespace dxvk {
     uint32_t getNumFramesToPutLightsToSleep() const { return numFramesToKeepLights() /2; }
     float getMeterToWorldUnitScale() const { return 100.f * getSceneScale(); } // RTX Remix world unit is in 1cm 
     float getSceneScale() const { return sceneScale(); }
-    float getTextureGridThumbnailScale() const { return textureGridThumbnailScale(); }
 
     // Render Pass Modes
     //RenderPassVolumeIntegrateRaytraceMode getRenderPassVolumeIntegrateRaytraceMode() const { return renderPassVolumeIntegrateRaytraceMode; }

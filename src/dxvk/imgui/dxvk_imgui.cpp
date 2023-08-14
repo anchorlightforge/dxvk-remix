@@ -1638,7 +1638,7 @@ namespace dxvk {
   void ImGUI::showSetupWindow(const Rc<DxvkContext>& ctx) {
     ImGui::PushItemWidth(200);
 
-    const float thumbnailScale = RtxOptions::Get()->getTextureGridThumbnailScale();
+    const float thumbnailScale = RtxOptions::textureGridThumbnailScale();
     const float thumbnailSize = (120.f * thumbnailScale);
     const float thumbnailSpacing = ImGui::GetStyle().ItemSpacing.x;
     const float thumbnailPadding = ImGui::GetStyle().CellPadding.x;
@@ -1656,6 +1656,8 @@ namespace dxvk {
       else {
         ImGui::Indent();
         if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("UI Textures", collapsingHeaderClosedFlags), RtxOptions::Get()->uiTexturesDescription())) {
+          //Legacy GUI: Using indents in this field is causing issues with padding where the rightmost texture is cut off by the scroll bar.
+          //Unindent and indent around each list to preserve formatting and use full space while keeping headers and other UI indented for organization.
           ImGui::Unindent();
           showTextureSelectionGrid(ctx, "uitextures", numThumbnailsPerRow, thumbnailSize);
           ImGui::Indent();
@@ -1669,7 +1671,6 @@ namespace dxvk {
         }
 
         if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Worldspace UI Background Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->worldSpaceUiBackgroundTexturesDescription())) {
-          ImGui::DragFloat("Worldspace UI Background Offset", &RtxOptions::Get()->worldSpaceUiBackgroundOffsetObject(), 0.01f, -FLT_MAX, FLT_MAX, "%.3f", sliderFlags);
           ImGui::Unindent();
           showTextureSelectionGrid(ctx, "worldspaceuibackgroundtextures", numThumbnailsPerRow, thumbnailSize);
           ImGui::Indent();
@@ -1741,7 +1742,6 @@ namespace dxvk {
         }
 
         if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Legacy Cutout Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->cutoutTexturesDescription())) {
-          ImGui::DragFloat("Force Cutout Alpha", &RtxOptions::Get()->forceCutoutAlphaObject(), 0.01f, 0.0f, 1.0f, "%.3f", sliderFlags);
           ImGui::Unindent();
           showTextureSelectionGrid(ctx, "cutouttextures", numThumbnailsPerRow, thumbnailSize);
           ImGui::Indent();
@@ -1800,9 +1800,8 @@ namespace dxvk {
       ImGui::Checkbox("Scene Left-Handed", &RtxOptions::Get()->isLHSObject());
       fusedWorldViewModeCombo.getKey(&RtxOptions::Get()->fusedWorldViewModeRef());
       ImGui::Separator();
-      ImGui::Separator();
       ImGui::DragFloat("Unique Object Search Distance", &RtxOptions::Get()->uniqueObjectDistanceObject(), 0.01f, 0.01f, FLT_MAX, "%.3f", sliderFlags);
-
+      ImGui::Separator();
       ImGui::DragFloat("Vertex Color Strength", &RtxOptions::Get()->vertexColorStrengthObject(), 0.001f, 0.0f, 1.0f);
       ImGui::Separator();
       if (ImGui::CollapsingHeader("Texture Parameters", collapsingHeaderClosedFlags)) {
