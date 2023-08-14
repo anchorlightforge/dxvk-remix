@@ -174,7 +174,7 @@ XXH64_hash_t getLightHash(const pxr::UsdPrim& prim) {
   return getNamedHash(prim.GetName().GetString(), prefix, len);
 }
 
-XXH64_hash_t getMaterialHash(const pxr::UsdPrim& prim) {
+XXH64_hash_t getMaterialHash(const pxr::UsdPrim& prim, const pxr::UsdPrim& shader) {
   static const pxr::TfToken kMaterialType("Material");
   static const char* prefix = lss::prefix::mat.c_str();
   static const size_t len = strlen(prefix);
@@ -186,16 +186,17 @@ XXH64_hash_t getMaterialHash(const pxr::UsdPrim& prim) {
   if (prim.GetTypeName() != kMaterialType) {
     return 0;
   }
-  // TODO this is just using prim name, will break if the same shader is overridden multiple ways in different places
-  // Need to use file name of usd with opinion being used as well as the prim name.
+
+  if (!shader.IsValid()) {
+    return 0;
+  }
   
-  XXH64_hash_t usdOriginHash = getStrongestOpinionatedPathHash(prim);
+  XXH64_hash_t usdOriginHash = getStrongestOpinionatedPathHash(shader);
 
   return usdOriginHash;
 }
 
-bool getVector3(const pxr::UsdPrim& prim, const pxr::TfToken& token, Vector3& vector) {
-    pxr::UsdAttribute attr = prim.GetAttribute(token);
+bool getVector3(const pxr::UsdAttribute& attr, Vector3& vector) {
     if (attr.HasValue()) {
       pxr::GfVec3f vec;
       attr.Get(&vec);
@@ -205,25 +206,46 @@ bool getVector3(const pxr::UsdPrim& prim, const pxr::TfToken& token, Vector3& ve
     return false;
 }
 
+bool getVector3(const pxr::UsdPrim& prim, const pxr::TfToken& token, Vector3& vector) {
+  return getVector3(prim.GetAttribute(token), vector);
+}
+
+// USD transitioned from `intensity` to `inputs:intensity` for all its light attributes, we need to support content
+// authored before and after that change.
+const pxr::UsdAttribute getLightAttribute(const pxr::UsdPrim& prim, const pxr::TfToken& token, const pxr::TfToken& inputToken) {
+  const pxr::UsdAttribute& attr = prim.GetAttribute(inputToken);
+  if (!attr.HasValue()) {
+    const pxr::UsdAttribute& old_attr = prim.GetAttribute(token);
+    if (old_attr.HasValue()) {
+      ONCE(Logger::warn(str::format("Legacy light attribute detected: ", old_attr.GetPath())));
+    }
+    return old_attr;
+  }
+  return attr;
+}
+
 RtLightShaping getLightShaping(const pxr::UsdPrim& lightPrim, Vector3 zAxis) {
   static const pxr::TfToken kConeAngleToken("shaping:cone:angle");
   static const pxr::TfToken kConeSoftnessToken("shaping:cone:softness");
   static const pxr::TfToken kFocusToken("shaping:focus");
+  static const pxr::TfToken kInputsConeAngleToken("inputs:shaping:cone:angle");
+  static const pxr::TfToken kInputsConeSoftnessToken("inputs:shaping:cone:softness");
+  static const pxr::TfToken kInputsFocusToken("inputs:shaping:focus");
 
   RtLightShaping shaping;
 
   shaping.primaryAxis = zAxis;
 
   float angle = 180.f;
-  lightPrim.GetAttribute(kConeAngleToken).Get(&angle);
+  getLightAttribute(lightPrim, kConeAngleToken, kInputsConeAngleToken).Get(&angle);
   shaping.cosConeAngle = cos(angle * kDegreesToRadians);
   
   float softness = 0.0f;
-  lightPrim.GetAttribute(kConeSoftnessToken).Get(&softness);
+  getLightAttribute(lightPrim, kConeSoftnessToken, kInputsConeSoftnessToken).Get(&softness);
   shaping.coneSoftness = softness;
 
   float focus = 0.0f;
-  lightPrim.GetAttribute(kFocusToken).Get(&focus);
+  getLightAttribute(lightPrim, kFocusToken, kInputsFocusToken).Get(&focus);
   shaping.focusExponent = focus;
   
   if (shaping.cosConeAngle != -1.f || shaping.coneSoftness != 0.0f || shaping.focusExponent != 0.0f ) {
@@ -374,17 +396,6 @@ MaterialData* UsdMod::Impl::processMaterial(Args& args, const pxr::UsdPrim& matP
   static const pxr::TfToken kLegacyRayPortalIndexToken("rayPortalIndex");
   static const pxr::TfToken kLegacySpriteRotationSpeedToken("rotationSpeed"); 
 
-  XXH64_hash_t materialHash = getMaterialHash(matPrim);
-  if (materialHash == 0) {
-    return nullptr;
-  }
-
-  // Check if the material has already been processed
-  MaterialData* materialData;
-  if (m_owner.m_replacements->getObject(materialHash, materialData)) {
-    return materialData;
-  }
-
   pxr::UsdPrim shader = matPrim.GetChild(kShaderToken);
   if (!shader.IsValid() || !shader.IsA<pxr::UsdShadeShader>()) {
     auto children = matPrim.GetFilteredChildren(pxr::UsdPrimIsActive);
@@ -398,6 +409,18 @@ MaterialData* UsdMod::Impl::processMaterial(Args& args, const pxr::UsdPrim& matP
   if (!shader.IsValid()) {
     return nullptr;
   }
+
+  XXH64_hash_t materialHash = getMaterialHash(matPrim, shader);
+  if (materialHash == 0) {
+    return nullptr;
+  }
+
+  // Check if the material has already been processed
+  MaterialData* materialData;
+  if (m_owner.m_replacements->getObject(materialHash, materialData)) {
+    return materialData;
+  }
+
 
   int spriteSheetRows = RtxOptions::Get()->getSharedMaterialDefaults().SpriteSheetRows;
   int spriteSheetCols = RtxOptions::Get()->getSharedMaterialDefaults().SpriteSheetCols;
@@ -752,11 +775,6 @@ void UsdMod::Impl::processPrim(Args& args, pxr::UsdPrim& prim) {
       pxr::UsdGeomPrimvar jointIndicesPV = skelBinding.GetJointIndicesPrimvar();
       pxr::UsdGeomPrimvar jointWeightsPV = skelBinding.GetJointWeightsPrimvar();
       numBones = jointIndicesPV.GetElementSize();
-      if (numBones > 4) {
-        Logger::err(str::format("Prim: ", prim.GetPath().GetString(), ", has more than 4 bones per vertex.  Falling back to 4 bones per vertex."));
-        // Should be safe to fall back to just 4 bones, though vertices with more bound bones will animate wrong.
-        numBones = 4;
-      }
       if (!jointWeightsPV.HasValue()) {
         Logger::err(str::format("Prim: ", prim.GetPath().GetString(), ", has Skeleton API but no joint weights."));
       }
@@ -800,7 +818,7 @@ void UsdMod::Impl::processPrim(Args& args, pxr::UsdPrim& prim) {
     const size_t pointsSize = sizeof(pxr::GfVec3f);
     const size_t normalsSize = isNormalValid ? sizeof(pxr::GfVec3f) : 0;
     const size_t uvSize = isUVValid ? sizeof(pxr::GfVec2f) : 0;
-    const size_t jointIndicesSize = isJointIndicesValid ? sizeof(uint32_t): 0;
+    const size_t jointIndicesSize = isJointIndicesValid ? align(numBones, 4): 0;
     const size_t jointWeightsSize = isJointWeightsValid ? sizeof(float) * (numBones - 1) : 0; // last weight is 1 minus the other weights
     const size_t vertexStructureSize = pointsSize + normalsSize + uvSize + jointIndicesSize + jointWeightsSize;
 
@@ -880,12 +898,14 @@ void UsdMod::Impl::processPrim(Args& args, pxr::UsdPrim& prim) {
       }
 
       if (isJointIndicesValid) {
-        uint32_t vertIndices = 0;
-        for (int j = 0; j < numBones; ++j) {
-          vertIndices |= jointIndices[i * numBones + j] << 8 * j;
+        for (int j = 0; j < numBones; j += 4) {
+          uint32_t vertIndices = 0;
+          for (int k = 0; k < 4 && j + k < numBones; ++k) {
+            vertIndices |= jointIndices[i * numBones + j + k] << 8 * k;
+          }
+          memcpy(pBaseVertexData, &vertIndices, sizeof(float));
+          pBaseVertexData++;
         }
-        memcpy(pBaseVertexData, &vertIndices, sizeof(float));
-        pBaseVertexData++;
       }
 
       if (isJointWeightsValid) {
@@ -1028,6 +1048,11 @@ void UsdMod::Impl::processLight(Args& args, const pxr::UsdPrim& lightPrim) {
   static const pxr::TfToken kHeightToken("height");
   static const pxr::TfToken kLengthToken("length");
   static const pxr::TfToken kAngleToken("angle");
+  static const pxr::TfToken kInputsRadiusToken("inputs:radius");
+  static const pxr::TfToken kInputsWidthToken("inputs:width");
+  static const pxr::TfToken kInputsHeightToken("inputs:height");
+  static const pxr::TfToken kInputsLengthToken("inputs:length");
+  static const pxr::TfToken kInputsAngleToken("inputs:angle");
   static constexpr float degreesToRadians = float(M_PI / 180.0);
   RtLight genericLight;
   if (args.rootPrim.IsA<pxr::UsdGeomMesh>() && lightPrim.IsA<pxr::UsdLuxDistantLight>()) {
@@ -1066,16 +1091,21 @@ void UsdMod::Impl::processLight(Args& args, const pxr::UsdPrim& lightPrim) {
   static const pxr::TfToken kColorTemperatureToken("colorTemperature");
   static const pxr::TfToken kIntensityToken("intensity");
   static const pxr::TfToken kExposureToken("exposure");
+  static const pxr::TfToken kInputsEnableColorTemperatureToken("inputs:enableColorTemperature");
+  static const pxr::TfToken kInputsColorToken("inputs:color");
+  static const pxr::TfToken kInputsColorTemperatureToken("inputs:colorTemperature");
+  static const pxr::TfToken kInputsIntensityToken("inputs:intensity");
+  static const pxr::TfToken kInputsExposureToken("inputs:exposure");
   Vector3 radiance(1.f);
   Vector3 temperature(1.f);
   float exposure = 0.0f;
   float intensity = 0.0f;
 
-  getVector3(lightPrim, kColorToken, radiance);
+  getVector3(getLightAttribute(lightPrim, kColorToken, kInputsColorToken), radiance);
   bool enableColorTemperature = false;
-  lightPrim.GetAttribute(kEnableColorTemperatureToken).Get(&enableColorTemperature);
+  getLightAttribute(lightPrim, kEnableColorTemperatureToken, kInputsEnableColorTemperatureToken).Get(&enableColorTemperature);
   if (enableColorTemperature) {
-    pxr::UsdAttribute colorTempAttr = lightPrim.GetAttribute(kColorTemperatureToken);
+    pxr::UsdAttribute colorTempAttr = getLightAttribute(lightPrim, kColorTemperatureToken, kInputsColorTemperatureToken);
     if (colorTempAttr.HasValue()) {
       float temp = 6500.f;
       colorTempAttr.Get(&temp);
@@ -1083,42 +1113,39 @@ void UsdMod::Impl::processLight(Args& args, const pxr::UsdPrim& lightPrim) {
       temperature = Vector3(vec.data());
     }
   }
-  lightPrim.GetAttribute(kExposureToken).Get(&exposure);
-
-  // Default Intensity value is different per type of light, and Kit always includes it.
-  assert(lightPrim.HasAttribute(kIntensityToken)); 
-  lightPrim.GetAttribute(kIntensityToken).Get(&intensity);
+  getLightAttribute(lightPrim, kExposureToken, kInputsExposureToken).Get(&exposure);
+  getLightAttribute(lightPrim, kIntensityToken, kInputsIntensityToken).Get(&intensity);
   
   radiance = radiance * intensity * pow(2, exposure) * temperature;
 
   // Per Light type properties.
   if (lightPrim.IsA<pxr::UsdLuxSphereLight>()) {
     float radius;
-    lightPrim.GetAttribute(kRadiusToken).Get(&radius);
+    getLightAttribute(lightPrim, kRadiusToken, kInputsRadiusToken).Get(&radius);
     RtLightShaping shaping = getLightShaping(lightPrim, -zAxis);
     genericLight = RtLight(RtSphereLight(position, radiance, radius, shaping));
   } else if (lightPrim.IsA<pxr::UsdLuxRectLight>()) {
     float width, height = 0.0f;
-    lightPrim.GetAttribute(kWidthToken).Get(&width);
-    lightPrim.GetAttribute(kHeightToken).Get(&height);
+    getLightAttribute(lightPrim, kWidthToken, kInputsWidthToken).Get(&width);
+    getLightAttribute(lightPrim, kHeightToken, kInputsHeightToken).Get(&height);
     Vector2 dimensions(width * xScale, height * yScale);
     RtLightShaping shaping = getLightShaping(lightPrim, zAxis);
     genericLight = RtLight(RtRectLight(position, dimensions, xAxis, yAxis, radiance, shaping));
   } else if (lightPrim.IsA<pxr::UsdLuxDiskLight>()) {
     float radius;
-    lightPrim.GetAttribute(kRadiusToken).Get(&radius);
+    getLightAttribute(lightPrim, kRadiusToken, kInputsRadiusToken).Get(&radius);
     Vector2 halfDimensions(radius * xScale, radius * yScale);
     RtLightShaping shaping = getLightShaping(lightPrim, zAxis);
     genericLight = RtLight(RtDiskLight(position, halfDimensions, xAxis, yAxis, radiance, shaping));
   } else if (lightPrim.IsA<pxr::UsdLuxCylinderLight>()) {
     float radius;
-    lightPrim.GetAttribute(kRadiusToken).Get(&radius);
+    getLightAttribute(lightPrim, kRadiusToken, kInputsRadiusToken).Get(&radius);
     float axisLength;
-    lightPrim.GetAttribute(kLengthToken).Get(&axisLength);
+    getLightAttribute(lightPrim, kLengthToken, kInputsLengthToken).Get(&axisLength);
     genericLight = RtLight(RtCylinderLight(position, radius, xAxis, axisLength * xScale, radiance));
   } else if (lightPrim.IsA<pxr::UsdLuxDistantLight>()) {
     float halfAngle;
-    lightPrim.GetAttribute(kAngleToken).Get(&halfAngle);
+    getLightAttribute(lightPrim, kAngleToken, kInputsAngleToken).Get(&halfAngle);
     halfAngle = halfAngle * degreesToRadians / 2.0f;
     genericLight = RtLight(RtDistantLight(zAxis, halfAngle, radiance));
   } else {
@@ -1324,8 +1351,6 @@ void UsdMod::Impl::processUSD(const Rc<DxvkContext>& context) {
     Args args = {context, xformCache, materialRoot, placeholder};
 
     for (pxr::UsdPrim materialPrim : children) {
-      XXH64_hash_t hash = getMaterialHash(materialPrim);
-
       processMaterial(args, materialPrim);
     }
   }
