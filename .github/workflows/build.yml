@@ -2,7 +2,7 @@ name: Build
 
 on:
   push:
-    branches: [ main ]
+    branches: [ i14RenderTargetImgui ]
   pull_request:
     branches: [ main ]
 
