@@ -159,7 +159,6 @@ namespace dxvk {
     m_lightManager.clear();
     m_rayPortalManager.clear();
     m_drawCallCache.clear();
-    m_drawCallCache.clear();
     textureManager.clear();
 
     m_previousFrameSceneAvailable = false;
@@ -193,17 +192,12 @@ namespace dxvk {
     else { // Implement anti-culling BLAS/Scene object GC
       cFrustum& cameraFrustum = getCamera().getFrustum();
 
+      fast_unordered_cache<const RtInstance*> outsideFrustumInstancesCache;
+
       auto& entries = m_drawCallCache.getEntries();
       for (auto& iter = entries.begin(); iter != entries.end();) {
         bool isAllInstancesInCurrentBlasInsideFrustum = true;
         for (const RtInstance* instance : iter->second.getLinkedInstances()) {
-          // No need to do frustum check for instances under the keeping threshold
-          const uint32_t numFramesToKeepInstances = RtxOptions::Get()->getNumFramesToKeepInstances();
-          const uint32_t currentFrame = m_device->getCurrentFrameId();
-          if (instance->getFrameLastUpdated() + numFramesToKeepInstances > currentFrame) {
-            continue;
-          }
-
           const Matrix4 objectToView = getCamera().getWorldToView(false) * instance->getBlas()->input.getTransformData().objectToWorld;
 
           bool isInsideFrustum = true;
@@ -223,6 +217,31 @@ namespace dxvk {
           } else {
             instance->markAsOutsideFrustum();
             isAllInstancesInCurrentBlasInsideFrustum = false;
+
+            // Anti-Culling GC extension:
+            // Eliminate duplicated instances that are outside of the game frustum.
+            // This is used to handle cases:
+            //   1. The game frustum is different to our frustum
+            //   2. The game culling method is NOT frustum culling
+            const XXH64_hash_t materialHash = instance->getMaterialDataHash();
+            const Vector3 pos = instance->getWorldPosition();
+            const XXH64_hash_t posHash = XXH3_64bits(&pos, sizeof(pos));
+            const XXH64_hash_t cacheHash = XXH64(&materialHash, sizeof(XXH64_hash_t), posHash);
+
+            auto it = outsideFrustumInstancesCache.find(cacheHash);
+            if (it == outsideFrustumInstancesCache.end()) {
+              // No duplication, just cache the current instance
+              outsideFrustumInstancesCache[cacheHash] = instance;
+            } else {
+              // Find potential duplication, only keep the instance that is latest updated
+              const RtInstance* cachedInstance = it->second;
+              if (instance->getFrameLastUpdated() <= cachedInstance->getFrameLastUpdated()) {
+                instance->markAsInsideFrustum();
+              } else {
+                cachedInstance->markAsInsideFrustum();
+                it->second = instance;
+              }
+            }
           }
         }
 
@@ -290,7 +309,7 @@ namespace dxvk {
   }
 
   template<bool isNew>
-  SceneManager::ObjectCacheState SceneManager::processGeometryInfo(Rc<DxvkContext> ctx, Rc<DxvkCommandList> cmd, const DrawCallState& drawCallState, RaytraceGeometry& inOutGeometry) {
+  SceneManager::ObjectCacheState SceneManager::processGeometryInfo(Rc<DxvkContext> ctx, const DrawCallState& drawCallState, RaytraceGeometry& inOutGeometry) {
     ScopedCpuProfileZone();
     ObjectCacheState result = ObjectCacheState::KBuildBVH;
     const RasterGeometry& input = drawCallState.getGeometryData();
@@ -451,7 +470,7 @@ namespace dxvk {
   std::unordered_set<XXH64_hash_t> uniqueHashes;
 
 
-  void SceneManager::submitDrawState(Rc<DxvkContext> ctx, Rc<DxvkCommandList> cmd, const DrawCallState& input) {
+  void SceneManager::submitDrawState(Rc<DxvkContext> ctx, const DrawCallState& input) {
     ScopedCpuProfileZone();
     const uint32_t kBufferCacheLimit = kSurfaceInvalidBufferIndex - 10; // Limit for unique buffers minus some padding
     if (m_bufferCache.getTotalCount() >= kBufferCacheLimit && m_bufferCache.getActiveCount() >= kBufferCacheLimit) {
@@ -549,9 +568,9 @@ namespace dxvk {
 
     uint64_t instanceId = UINT64_MAX;
     if (pReplacements != nullptr) {
-      instanceId = drawReplacements(ctx, cmd, &input, pReplacements, overrideMaterialData);
+      instanceId = drawReplacements(ctx, &input, pReplacements, overrideMaterialData);
     } else {
-      instanceId = processDrawCallState(ctx, cmd, input, overrideMaterialData);
+      instanceId = processDrawCallState(ctx, input, overrideMaterialData);
     }
   }
 
@@ -611,7 +630,7 @@ namespace dxvk {
     m_lightManager.addLight(rtLight, input);
   }
 
-  uint64_t SceneManager::drawReplacements(Rc<DxvkContext> ctx, Rc<DxvkCommandList> cmd, const DrawCallState* input, const std::vector<AssetReplacement>* pReplacements, const MaterialData* overrideMaterialData) {
+  uint64_t SceneManager::drawReplacements(Rc<DxvkContext> ctx, const DrawCallState* input, const std::vector<AssetReplacement>* pReplacements, const MaterialData* overrideMaterialData) {
     ScopedCpuProfileZone();
     uint64_t rootInstanceId = UINT64_MAX;
     // Detect replacements of meshes that would have unstable hashes due to the vertex hash using vertex data from a shared vertex buffer.
@@ -619,7 +638,7 @@ namespace dxvk {
     const bool highlightUnsafeReplacement = RtxOptions::Get()->getHighlightUnsafeReplacementModeEnabled() &&
         input->getGeometryData().indexBuffer.defined() && input->getGeometryData().vertexCount > input->getGeometryData().indexCount;
     if (!pReplacements->empty() && (*pReplacements)[0].includeOriginal) {
-      rootInstanceId = processDrawCallState(ctx, cmd, *input, overrideMaterialData);
+      rootInstanceId = processDrawCallState(ctx, *input, overrideMaterialData);
     }
     for (auto&& replacement : *pReplacements) {
       if (replacement.type == AssetReplacement::eMesh) {
@@ -647,19 +666,22 @@ namespace dxvk {
             overrideMaterialData = &sHighlightMaterialData;
           }
         }
-        uint64_t instanceId = processDrawCallState(ctx, cmd, newDrawCallState, overrideMaterialData);
+        uint64_t instanceId = processDrawCallState(ctx, newDrawCallState, overrideMaterialData);
         if (rootInstanceId == UINT64_MAX) {
           rootInstanceId = instanceId;
         }
-      } else {
+      }
+    }
+    for (auto&& replacement : *pReplacements) {
+      if (replacement.type == AssetReplacement::eLight) {
         if (rootInstanceId == UINT64_MAX) {
           // TODO(TREX-1141) if we refactor instancing to depend on the pre-replacement drawcall instead
           // of the fully processed draw call, we can remove this requirement.
           Logger::err(str::format(
-              "Light prims attached to replacement meshes must come after a mesh prim.  mesh hash: ",
+              "Light prims anchored to a mesh replacement must also include actual meshes.  mesh hash: ",
               std::hex, input->getHash(RtxOptions::Get()->GeometryHashGenerationRule)
           ));
-          continue;
+          break;
         }
         RtLight localLight(replacement.lightData);
         localLight.setRootInstanceId(rootInstanceId);
@@ -714,9 +736,9 @@ namespace dxvk {
     }
   }
 
-  SceneManager::ObjectCacheState SceneManager::onSceneObjectAdded(Rc<DxvkContext> ctx, Rc<DxvkCommandList> cmd, const DrawCallState& drawCallState, BlasEntry* pBlas) {
+  SceneManager::ObjectCacheState SceneManager::onSceneObjectAdded(Rc<DxvkContext> ctx, const DrawCallState& drawCallState, BlasEntry* pBlas) {
     // This is a new object.
-    ObjectCacheState result = processGeometryInfo<true>(ctx, cmd, drawCallState, pBlas->modifiedGeometryData);
+    ObjectCacheState result = processGeometryInfo<true>(ctx, drawCallState, pBlas->modifiedGeometryData);
     
     assert(result == ObjectCacheState::KBuildBVH);
 
@@ -725,14 +747,14 @@ namespace dxvk {
     return result;
   }
   
-  SceneManager::ObjectCacheState SceneManager::onSceneObjectUpdated(Rc<DxvkContext> ctx, Rc<DxvkCommandList> cmd, const DrawCallState& drawCallState, BlasEntry* pBlas) {
+  SceneManager::ObjectCacheState SceneManager::onSceneObjectUpdated(Rc<DxvkContext> ctx, const DrawCallState& drawCallState, BlasEntry* pBlas) {
     if (pBlas->frameLastTouched == m_device->getCurrentFrameId()) {
       pBlas->cacheMaterial(drawCallState.getMaterialData());
       return SceneManager::ObjectCacheState::kUpdateInstance;
     }
 
     // TODO: If mesh is static, no need to do any of the below, just use the existing modifiedGeometryData and set result to kInstanceUpdate.
-    ObjectCacheState result = processGeometryInfo<false>(ctx, cmd, drawCallState, pBlas->modifiedGeometryData);
+    ObjectCacheState result = processGeometryInfo<false>(ctx, drawCallState, pBlas->modifiedGeometryData);
 
     // We dont expect to hit the rebuild path here - since this would indicate an index buffer or other topological change, and that *should* trigger a new scene object (since the hash would change)
     assert(result != ObjectCacheState::KBuildBVH);
@@ -748,6 +770,7 @@ namespace dxvk {
   void SceneManager::onSceneObjectDestroyed(const BlasEntry& blas) {
     for (const RtInstance* instance : blas.getLinkedInstances()) {
       instance->markForGarbageCollection();
+      instance->markAsUnlinkedFromBlasEntryForGarbageCollection();
     }
   }
 
@@ -808,7 +831,7 @@ namespace dxvk {
     textureManager.addTexture(ctx, inputTexture, sampler, allowAsync, textureIndex);
   }
 
-  uint64_t SceneManager::processDrawCallState(Rc<DxvkContext> ctx, Rc<DxvkCommandList> cmd, const DrawCallState& drawCallState, const MaterialData* overrideMaterialData) {
+  uint64_t SceneManager::processDrawCallState(Rc<DxvkContext> ctx, const DrawCallState& drawCallState, const MaterialData* overrideMaterialData) {
     ScopedCpuProfileZone();
     const MaterialData& renderMaterialData = overrideMaterialData != nullptr ? *overrideMaterialData : drawCallState.getMaterialData();
     if (renderMaterialData.getIgnored()) {
@@ -817,9 +840,9 @@ namespace dxvk {
     ObjectCacheState result = ObjectCacheState::kInvalid;
     BlasEntry* pBlas = nullptr;
     if (m_drawCallCache.get(drawCallState, &pBlas) == DrawCallCache::CacheState::kExisted) {
-      result = onSceneObjectUpdated(ctx, cmd, drawCallState, pBlas);
+      result = onSceneObjectUpdated(ctx, drawCallState, pBlas);
     } else {
-      result = onSceneObjectAdded(ctx, cmd, drawCallState, pBlas);
+      result = onSceneObjectAdded(ctx, drawCallState, pBlas);
     }
 
     // Update the input state, so we always have a reference to the original draw call state
@@ -1067,7 +1090,7 @@ namespace dxvk {
     }
   }
 
-  void SceneManager::prepareSceneData(Rc<DxvkContext> ctx, Rc<DxvkCommandList> cmdList, DxvkBarrierSet& execBarriers, const float frameTimeSecs) {
+  void SceneManager::prepareSceneData(Rc<DxvkContext> ctx, DxvkBarrierSet& execBarriers, const float frameTimeSecs) {
     ScopedGpuProfileZone(ctx, "Build Scene");
 
     // Needs to happen before garbageCollection to avoid destroying dynamic lights
@@ -1076,7 +1099,7 @@ namespace dxvk {
     garbageCollection();
     
     auto& textureManager = m_device->getCommon()->getTextureManager();
-    m_bindlessResourceManager.prepareSceneData(cmdList, textureManager.getTextureTable(), getBufferTable());
+    m_bindlessResourceManager.prepareSceneData(ctx, textureManager.getTextureTable(), getBufferTable());
 
     // If there are no instances, we should do nothing!
     if (m_instanceManager.getActiveCount() == 0) {
@@ -1124,17 +1147,17 @@ namespace dxvk {
     }
 
     m_instanceManager.findPortalForVirtualInstances(m_cameraManager, m_rayPortalManager);
-    m_instanceManager.createViewModelInstances(ctx, cmdList, m_cameraManager, m_rayPortalManager);
+    m_instanceManager.createViewModelInstances(ctx, m_cameraManager, m_rayPortalManager);
     m_instanceManager.createPlayerModelVirtualInstances(ctx, m_cameraManager, m_rayPortalManager);
 
-    m_accelManager.mergeInstancesIntoBlas(ctx, cmdList, execBarriers, textureManager.getTextureTable(), m_cameraManager, m_instanceManager, m_opacityMicromapManager.get(), frameTimeSecs);
+    m_accelManager.mergeInstancesIntoBlas(ctx, execBarriers, textureManager.getTextureTable(), m_cameraManager, m_instanceManager, m_opacityMicromapManager.get(), frameTimeSecs);
 
     // Call on the other managers to prepare their GPU data for the current scene
-    m_accelManager.prepareSceneData(ctx, cmdList, execBarriers, m_instanceManager);
+    m_accelManager.prepareSceneData(ctx, execBarriers, m_instanceManager);
     m_lightManager.prepareSceneData(ctx, m_cameraManager);
 
     // Build the TLAS
-    m_accelManager.buildTlas(ctx, cmdList);
+    m_accelManager.buildTlas(ctx);
 
     // Todo: These updates require a lot of temporary buffer allocations and memcopies, ideally we should memcpy directly into a mapped pointer provided by Vulkan,
     // but we have to create a buffer to pass to DXVK's updateBuffer for now.

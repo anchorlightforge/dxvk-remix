@@ -141,14 +141,18 @@ namespace dxvk {
   std::vector<RtxTextureOption> rtxTextureOptions = {
     {"uitextures", "UI Texture", &RtxOptions::Get()->uiTexturesObject()},
     {"worldspaceuitextures", "World Space UI Texture", &RtxOptions::Get()->worldSpaceUiTexturesObject()},
+    {"worldspaceuibackgroundtextures", "World Space UI Background Texture", &RtxOptions::Get()->worldSpaceUiBackgroundTexturesObject()},
     {"skytextures", "Sky Texture", &RtxOptions::Get()->skyBoxTexturesObject()},
     {"ignoretextures", "Ignore Texture (optional)", &RtxOptions::Get()->ignoreTexturesObject()},
+    {"hidetextures", "Hide Texture Instance (optional)", &RtxOptions::Get()->hideInstanceTexturesObject()},
+    {"lightmaptextures","Lightmap Textures (optional)", &RtxOptions::Get()->lightmapTexturesObject()},
     {"ignorelights", "Ignore Lights (optional)", &RtxOptions::Get()->ignoreLightsObject()},
     {"particletextures", "Particle Texture (optional)", &RtxOptions::Get()->particleTexturesObject()},
     {"beamtextures", "Beam Texture (optional)", &RtxOptions::Get()->beamTexturesObject()},
     {"lightconvertertextures", "Add Light to Textures (optional)", &RtxOptions::Get()->lightConverterObject()},
     {"decaltextures", "Decal Texture (optional)", &RtxOptions::Get()->decalTexturesObject()},
     {"dynamicdecaltextures", "Dynamic Decal Texture", &RtxOptions::Get()->dynamicDecalTexturesObject()},
+    {"singleoffsetdecaltextures", "Single Offset Decal Texture", &RtxOptions::Get()->singleOffsetDecalTexturesObject()},
     {"nonoffsetdecaltextures", "Non-Offset Decal Texture", &RtxOptions::Get()->nonOffsetDecalTexturesObject()},
     {"cutouttextures", "Legacy Cutout Texture (optional)", &RtxOptions::Get()->cutoutTexturesObject()},
     {"terraintextures", "Terrain Texture", &RtxOptions::Get()->terrainTexturesObject()},
@@ -950,8 +954,10 @@ namespace dxvk {
     const int subItemIndent) {
     auto common = ctx->getCommonObjects();
     DxvkDLSS& dlss = common->metaDLSS();
+    DxvkDLFG& dlfg = common->metaDLFG();
 
     const bool dlssSupported = dlss.supportsDLSS();
+    const bool dlfgSupported = dlfg.supportsDLFG();
 
     // Describe the tab
 
@@ -969,7 +975,7 @@ namespace dxvk {
     // Preset Settings
 
     if (dlssSupported) {
-      const char* dlssPresetText = "DLSS 2.0 Preset";
+      const char* dlssPresetText = dlfgSupported ? "DLSS 3.0 Preset" : "DLSS 2.0 Preset";
       const DlssPreset prevDlssPreset = RtxOptions::Get()->dlssPreset();
 
       ImGui::TextSeparator("Preset Settings");
@@ -1061,6 +1067,10 @@ namespace dxvk {
     }
 
     // Latency Reduction Settings
+    if (dlfgSupported) {
+      ImGui::TextSeparator("Frame Generation Settings");
+      showDLFGOptions(ctx);
+    }
 
     ImGui::TextSeparator("Latency Reduction Settings");
 
@@ -1069,7 +1079,7 @@ namespace dxvk {
 
       // Note: Option to toggle the stats window is set to false here as this window is currently
       // set up to display only when the "advanced" developer settings UI is active.
-      showReflexOptions(false);
+      showReflexOptions(ctx, false);
 
       ImGui::EndDisabled();
     }
@@ -1310,7 +1320,7 @@ namespace dxvk {
     ImGui::SameLine(200.f);
     ImGui::Checkbox("Live shader edit mode", &RtxOptions::Get()->useLiveShaderEditModeObject());
 
-    ImGui::Checkbox("Force V-Sync Off?", &RtxOptions::Get()->forceVsyncOffObject());
+    showVsyncOptions();
 
     if (ImGui::CollapsingHeader("Camera", collapsingHeaderFlags)) {
       ImGui::Indent();
@@ -1635,7 +1645,8 @@ namespace dxvk {
   void ImGUI::showSetupWindow(const Rc<DxvkContext>& ctx) {
     ImGui::PushItemWidth(200);
 
-    const float thumbnailSize = 120.f;
+    const float thumbnailScale = RtxOptions::textureGridThumbnailScale();
+    const float thumbnailSize = (120.f * thumbnailScale);
     const float thumbnailSpacing = ImGui::GetStyle().ItemSpacing.x;
     const float thumbnailPadding = ImGui::GetStyle().CellPadding.x;
     const uint32_t numThumbnailsPerRow = uint32_t(std::max(1.f, (m_windowWidth - 18.f) / (thumbnailSize + thumbnailSpacing + thumbnailPadding * 2.f)));
@@ -1643,96 +1654,156 @@ namespace dxvk {
     ImGui::Checkbox("Preserve discarded textures", &RtxOptions::Get()->keepTexturesForTaggingObject());
 
     if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 1: Categorize Textures", collapsingHeaderClosedFlags), "Select texture definitions for Remix")) {
-
       ImGui::Checkbox("Split Texture Category List", &showLegacyTextureGuiObject());
+      ImGui::DragFloat("Texture Thumbnail Scale", &RtxOptions::Get()->textureGridThumbnailScaleObject(), 0.25f, 0.25f, 3.f, "%.2f", sliderFlags);
+      ImGui::Separator();
 
       if (!showLegacyTextureGui()) {
         showTextureSelectionGrid(ctx, "textures", numThumbnailsPerRow, thumbnailSize);
       }
       else {
-        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 1: UI Textures", collapsingHeaderClosedFlags), RtxOptions::Get()->uiTexturesDescription())) {
-          showTextureSelectionGrid(ctx, "uitextures", numThumbnailsPerRow, thumbnailSize);
-        }
-
-        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 1.2: Worldspace UI Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->worldSpaceUiTexturesDescription())) {
-          showTextureSelectionGrid(ctx, "worldspaceuitextures", numThumbnailsPerRow, thumbnailSize);
-        }
-
-        if (ImGui::CollapsingHeader("Step 3: Sky Parameters (optional)", collapsingHeaderClosedFlags)) {
-          ImGui::Indent();
-
-          if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Sky Textures", collapsingHeaderClosedFlags), RtxOptions::Get()->skyBoxTexturesDescription())) {
-            showTextureSelectionGrid(ctx, "skytextures", numThumbnailsPerRow, thumbnailSize);
-          }
-
+        ImGui::Indent();
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("UI Textures", collapsingHeaderClosedFlags), RtxOptions::Get()->uiTexturesDescription())) {
+          //Legacy GUI: Using indents in this field is causing issues with padding where the rightmost texture is cut off by the scroll bar.
+          //Unindent and indent around each list to preserve formatting and use full space while keeping headers and other UI indented for organization.
           ImGui::Unindent();
+          showTextureSelectionGrid(ctx, "uitextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
 
-        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 4: Ignore Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->ignoreTexturesDescription())) {
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Worldspace UI Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->worldSpaceUiTexturesDescription())) {
+          ImGui::Unindent();
+          showTextureSelectionGrid(ctx, "worldspaceuitextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
+        }
+
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Worldspace UI Background Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->worldSpaceUiBackgroundTexturesDescription())) {
+          ImGui::Unindent();
+          showTextureSelectionGrid(ctx, "worldspaceuibackgroundtextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
+        }
+
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Sky Textures", collapsingHeaderClosedFlags), RtxOptions::Get()->skyBoxTexturesDescription())) {
+          ImGui::Unindent();
+          showTextureSelectionGrid(ctx, "skytextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
+        }
+
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Ignore Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->ignoreTexturesDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "ignoretextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
 
-        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 5: Ignore Lights (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->ignoreLightsDescription())) {
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Hide Instance Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->hideInstanceTexturesDescription())) {
+          ImGui::Unindent();
+          showTextureSelectionGrid(ctx, "hidetextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
+        }
+
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Lightmap Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->lightmapTexturesDescription())) {
+          ImGui::Unindent();
+          showTextureSelectionGrid(ctx, "lightmaptextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
+        }
+
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Ignore Lights (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->ignoreLightsDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "ignorelights", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
 
-        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 6: Particle Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->particleTexturesDescription())) {
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Particle Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->particleTexturesDescription())) {
+          ImGui::Unindent(); 
           showTextureSelectionGrid(ctx, "particletextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
 
-        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 6.1: Beam Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->beamTexturesDescription())) {
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Beam Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->beamTexturesDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "beamtextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
 
-        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 6.2: Add Lights to Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->lightConverterDescription())) {
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Add Lights to Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->lightConverterDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "lightconvertertextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
 
-        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 7: Decal Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->decalTexturesDescription())) {
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Decal Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->decalTexturesDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "decaltextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
 
-        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 7.1: Dynamic Decal Textures", collapsingHeaderClosedFlags), RtxOptions::Get()->dynamicDecalTexturesDescription())) {
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Dynamic Decal Textures", collapsingHeaderClosedFlags), RtxOptions::Get()->dynamicDecalTexturesDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "dynamicdecaltextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
+        }
+        
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Single Offset Decal Textures", collapsingHeaderClosedFlags), RtxOptions::Get()->singleOffsetDecalTexturesDescription())) {
+          ImGui::Unindent();
+          showTextureSelectionGrid(ctx, "singleoffsetdecaltextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
 
-        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 7.2: Non-Offset Decal Textures", collapsingHeaderClosedFlags), RtxOptions::Get()->nonOffsetDecalTexturesDescription())) {
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Non-Offset Decal Textures", collapsingHeaderClosedFlags), RtxOptions::Get()->nonOffsetDecalTexturesDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "nonoffsetdecaltextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
 
-        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 8.1: Legacy Cutout Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->cutoutTexturesDescription())) {
-          ImGui::DragFloat("Force Cutout Alpha", &RtxOptions::Get()->forceCutoutAlphaObject(), 0.01f, 0.0f, 1.0f, "%.3f", sliderFlags);
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Legacy Cutout Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->cutoutTexturesDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "cutouttextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
 
-        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 8.2: Terrain Textures", collapsingHeaderClosedFlags), RtxOptions::Get()->terrainTexturesDescription())) {
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Terrain Textures", collapsingHeaderClosedFlags), RtxOptions::Get()->terrainTexturesDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "terraintextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
 
-        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 8.3: Water Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->animatedWaterTexturesDescription())) {
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Water Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->animatedWaterTexturesDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "watertextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent(); 
+        }
+
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Player Model Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->playerModelTexturesDescription())) {
+          ImGui::Unindent();
+          showTextureSelectionGrid(ctx, "playermodeltextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent(); 
+        }
+
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Player Model Body Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->playerModelBodyTexturesDescription())) {
+          ImGui::Unindent();
+          showTextureSelectionGrid(ctx, "playermodelbodytextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
 
         if (RtxOptions::AntiCulling::Object::enable() &&
-          IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 8.4: Anti-Culling Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->antiCullingTexturesDescription())) {
+          IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Anti-Culling Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->antiCullingTexturesDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "antiCullingTextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
 
-        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 8.5: Motion Blur Mask-Out Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->motionBlurMaskOutTexturesDescription())) {
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Motion Blur Mask-Out Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->motionBlurMaskOutTexturesDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "motionBlurMaskOutTextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent(); 
         }
 
-        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 9.1: Player Model Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->playerModelTexturesDescription())) {
-          showTextureSelectionGrid(ctx, "playermodeltextures", numThumbnailsPerRow, thumbnailSize);
-        }
-
-        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 9.2: Player Model Body Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->playerModelBodyTexturesDescription())) {
-          showTextureSelectionGrid(ctx, "playermodelbodytextures", numThumbnailsPerRow, thumbnailSize);
-        }
-
-        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Step 10: Opacity Micromap Ignore Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->opacityMicromapIgnoreTexturesDescription())) {
+        if (IMGUI_ADD_TOOLTIP(ImGui::CollapsingHeader("Opacity Micromap Ignore Textures (optional)", collapsingHeaderClosedFlags), RtxOptions::Get()->opacityMicromapIgnoreTexturesDescription())) {
+          ImGui::Unindent();
           showTextureSelectionGrid(ctx, "opacitymicromapignoretextures", numThumbnailsPerRow, thumbnailSize);
+          ImGui::Indent();
         }
+        ImGui::Unindent();
       }
     }
 
@@ -1749,6 +1820,13 @@ namespace dxvk {
 
       ImGui::DragFloat("Vertex Color Strength", &RtxOptions::Get()->vertexColorStrengthObject(), 0.001f, 0.0f, 1.0f);
       ImGui::Separator();
+
+      if (ImGui::CollapsingHeader("Texture Parameters", collapsingHeaderClosedFlags)) {
+        ImGui::Indent();
+        ImGui::DragFloat("Force Cutout Alpha", &RtxOptions::Get()->forceCutoutAlphaObject(), 0.01f, 0.0f, 1.0f, "%.3f", sliderFlags);
+        ImGui::DragFloat("World Space UI Background Offset", &RtxOptions::Get()->worldSpaceUiBackgroundOffsetObject(), 0.01f, -FLT_MAX, FLT_MAX, "%.3f", sliderFlags);
+        ImGui::Unindent();
+      }
 
       if (ImGui::CollapsingHeader("Shader Support (Experimental)", collapsingHeaderClosedFlags)) {
         ImGui::Indent();
@@ -1809,7 +1887,59 @@ namespace dxvk {
     style->TabRounding = 1;
   }
 
-  void ImGUI::showReflexOptions(bool displayStatsWindowToggle) {
+  void ImGUI::showVsyncOptions() {
+    // we should never get here without a swapchain, so we must have latched the vsync value already
+    assert(RtxOptions::Get()->enableVsync() != EnableVsync::WaitingForImplicitSwapchain);
+    
+    bool vsyncEnabled = RtxOptions::Get()->enableVsync() == EnableVsync::On;
+    ImGui::Checkbox("Enable V-Sync", &vsyncEnabled);
+    RtxOptions::Get()->enableVsyncRef() = vsyncEnabled ? EnableVsync::On : EnableVsync::Off;
+  }
+
+  void ImGUI::showDLFGOptions(const Rc<DxvkContext>& ctx) {
+    if (!ctx->getCommonObjects()->metaNGXContext().supportsDLFG()) {
+      ImGui::BeginDisabled();
+    }
+
+    m_userGraphicsSettingChanged |= ImGui::Checkbox("Enable DLSS Frame Generation", &DxvkDLFG::enableObject());
+    const auto& reason = ctx->getCommonObjects()->metaNGXContext().getDLFGNotSupportedReason();
+    if (reason.size()) {
+      ImGui::SetTooltipToLastWidgetOnHover(reason.c_str());
+      ImGui::TextWrapped(reason.c_str());
+    }
+
+    if (!ctx->getCommonObjects()->metaNGXContext().supportsDLFG()) {
+      ImGui::EndDisabled();
+    }
+
+    if (DxvkDLFG::enable()) {
+      ImGui::BeginDisabled();
+    }
+
+    showVsyncOptions();
+    ImGui::BeginDisabled();
+    ImGui::Indent();
+    ImGui::TextWrapped("This setting overrides the native game's V-Sync setting.");
+    ImGui::Unindent();
+    ImGui::EndDisabled();
+    
+    if (DxvkDLFG::enable()) {
+      ImGui::Indent();
+      ImGui::TextWrapped("When Frame Generation is active, V-Sync is automatically disabled.");
+      ImGui::Unindent();
+
+      ImGui::EndDisabled();
+    }
+
+    // Force Reflex on when using G
+    if (ctx->isDLFGEnabled()) {
+      RtxOptions::Get()->reflexModeRef() = ReflexMode::LowLatency;
+    } else {
+      DxvkDLFG::enableRef() = false;
+    }
+  }
+
+  void ImGUI::showReflexOptions(const Rc<DxvkContext>& ctx, bool displayStatsWindowToggle) {
     RtxReflex& reflex = m_device->getCommon()->metaReflex();
 
     // Note: Skip Reflex ImGUI options if Reflex is not initialized (either fully disabled or failed to be initialized).
@@ -1821,7 +1951,12 @@ namespace dxvk {
 
     // Display Reflex mode selector
 
-    m_userGraphicsSettingChanged |= ImGui::Combo("Reflex", &RtxOptions::Get()->reflexModeObject(), "Disabled\0Enabled\0Enabled + Boost\0");
+    {
+      bool disableReflexUI = ctx->isDLFGEnabled();
+      ImGui::BeginDisabled(disableReflexUI);
+      m_userGraphicsSettingChanged |= ImGui::Combo("Reflex", &RtxOptions::Get()->reflexModeObject(), "Disabled\0Enabled\0Enabled + Boost\0");
+      ImGui::EndDisabled();
+    }
 
     // Add a button to toggle the Reflex latency stats Window if requested
 
@@ -1830,6 +1965,7 @@ namespace dxvk {
         m_reflexLatencyStatsOpen = !m_reflexLatencyStatsOpen;
       }
     }
+
   }
 
   void ImGUI::showReflexLatencyStats() {
@@ -1997,7 +2133,11 @@ namespace dxvk {
       ImGui::Separator();
 #endif
 
-      showReflexOptions(true);
+      showDLFGOptions(ctx);
+
+      ImGui::Separator();
+
+      showReflexOptions(ctx, true);
 
       ImGui::Separator();
 
@@ -2402,12 +2542,26 @@ namespace dxvk {
 
     if (ImGui::CollapsingHeader("Geometry", collapsingHeaderClosedFlags)) {
       ImGui::Indent();
+
       ImGui::Checkbox("Enable Triangle Culling (Globally)", &RtxOptions::Get()->enableCullingObject());
       ImGui::Checkbox("Enable Triangle Culling (Override Secondary Rays)", &RtxOptions::Get()->enableCullingInSecondaryRaysObject());
       ImGui::Separator();
       ImGui::DragInt("Min Prims in Static BLAS", &RtxOptions::Get()->minPrimsInStaticBLASObject(), 1.f, 100, 0);
       ImGui::Checkbox("Portals: Virtual Instance Matching", &RtxOptions::Get()->useRayPortalVirtualInstanceMatchingObject());
       ImGui::Checkbox("Portals: Fade In Effect", &RtxOptions::Get()->enablePortalFadeInEffectObject());
+      
+      if (ImGui::CollapsingHeader("Decals", collapsingHeaderClosedFlags)) {
+        ImGui::Indent();
+
+        ImGui::TextWrapped("Warning: changes to these parameters will only apply to new geometry. Existing geometry needs to be invalidated by either a game reload or gameplay and/or camera view change if the game uses runtime or view dependent geometry batching per draw call.");
+
+        ImGui::DragFloat("Offset Multiplier [m]", &RtxOptions::Decals::offsetMultiplierMetersObject(), 0.0001f, 0.f, 0.f, "%.5f");
+        ImGui::DragInt("Base Offset Index", &RtxOptions::Decals::baseOffsetIndexObject(), 1.f, 1, 1000);
+        ImGui::DragInt("Max Offset Index", &RtxOptions::Decals::maxOffsetIndexObject(), 1.f, 1, 10000);
+        ImGui::DragInt("Offset Increase Between Decal Draw Calls", &RtxOptions::Decals::offsetIndexIncreaseBetweenDrawCallsObject(), 1.f, 1, 1000);
+        ImGui::Unindent();
+      }
+
       ImGui::Unindent();
     }
 
@@ -2466,8 +2620,6 @@ namespace dxvk {
         ImGui::DragFloat("Max Anisotropy Samples", &RtxOptions::Get()->maxAnisotropySamplesObject(), 0.5f, 1.0f, 16.f, "%.3f", sliderFlags);
       }
       ImGui::DragFloat("Translucent Decal Albedo Factor", &RtxOptions::Get()->translucentDecalAlbedoFactorObject(), 0.01f);
-      ImGui::DragFloat("Decal Normal Offset", &RtxOptions::Get()->decalNormalOffsetObject(), 0.0001f, 0.f, 0.f, "%.4f");
-
       ImGui::Unindent();
     }
 
@@ -2497,8 +2649,11 @@ namespace dxvk {
     const HWND hwnd,
     const Rc<DxvkContext>& ctx,
     VkSurfaceFormatKHR surfaceFormat,
-    VkExtent2D        surfaceSize) {
+    VkExtent2D         surfaceSize,
+    bool               vsync) {
     ScopedGpuProfileZone(ctx, "ImGUI Render");
+
+    m_lastRenderVsyncStatus = vsync;
 
     ImGui::SetCurrentContext(m_context);
     ImPlot::SetCurrentContext(m_plotContext);

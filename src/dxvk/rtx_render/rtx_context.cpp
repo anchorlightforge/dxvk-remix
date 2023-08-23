@@ -229,6 +229,9 @@ namespace dxvk {
     }
     downscaleExtent.width = std::max(downscaleExtent.width, 1u);
     downscaleExtent.height = std::max(downscaleExtent.height, 1u);
+
+    m_common->metaDLFG().setDisplaySize(uint2(upscaleExtent.width, upscaleExtent.height));
+
     return downscaleExtent;
   }
 
@@ -298,6 +301,10 @@ namespace dxvk {
       RtxOptions::Get()->upscalerTypeRef() = UpscalerType::TAAU;
     }
 
+    if (DxvkDLFG::enable() && !getCommonObjects()->metaDLFG().supportsDLFG()) {
+      DxvkDLFG::enableRef() = false;
+    }
+    
     ShaderManager::getInstance()->checkForShaderChanges();
 
     const float frameTimeSecs = RtxOptions::Get()->timeDeltaBetweenFrames() == 0.f ? getWallTimeSinceLastCall() : RtxOptions::Get()->timeDeltaBetweenFrames();
@@ -356,7 +363,7 @@ namespace dxvk {
       reflex.beginRendering(cachedReflexFrameId);
 
       // Update all the GPU buffers needed to describe the scene
-      getSceneManager().prepareSceneData(this, m_cmd, m_execBarriers, frameTimeSecs);
+      getSceneManager().prepareSceneData(this, m_execBarriers, frameTimeSecs);
       
       // If we really don't have any RT to do, just bail early (could be UI/menus rendering)
       if (getSceneManager().getSurfaceBuffer() != nullptr) {
@@ -417,8 +424,16 @@ namespace dxvk {
 
         Resources::RaytracingOutput& rtOutput = getResourceManager().getRaytracingOutput();
 
+        if (getCommonObjects()->metaNGXContext().supportsDLFG()) {
+          rtOutput.m_primaryDepthQueue.next();
+          rtOutput.m_primaryScreenSpaceMotionVectorQueue.next();
+        }
+
+        rtOutput.m_primaryDepth = rtOutput.m_primaryDepthQueue.get();
+        rtOutput.m_primaryScreenSpaceMotionVector = rtOutput.m_primaryScreenSpaceMotionVectorQueue.get();
+
         // Generate ray tracing constant buffer
-        updateRaytraceArgsConstantBuffer(m_cmd, rtOutput, frameTimeSecs, downscaledExtent, targetImage->info().extent);
+        updateRaytraceArgsConstantBuffer(rtOutput, frameTimeSecs, downscaledExtent, targetImage->info().extent);
 
         // Volumetric Lighting
         dispatchVolumetrics(rtOutput);
@@ -518,6 +533,7 @@ namespace dxvk {
         // Debug view overrides
         dispatchDebugView(srcImage, rtOutput, captureScreenImage);
 
+        dispatchDLFG();
         {
           ScopedGpuProfileZone(this, "Blit to Game");
 
@@ -671,7 +687,7 @@ namespace dxvk {
       // Bake the terrain
       bakeTerrain(params, drawCallState);
 
-      getSceneManager().submitDrawState(this, m_cmd, drawCallState);
+      getSceneManager().submitDrawState(this, drawCallState);
     }
   }
 
@@ -699,7 +715,7 @@ namespace dxvk {
     outSecondaryNrdArgs = denoiser2.getNrdArgs();
   }
 
-  void RtxContext::updateRaytraceArgsConstantBuffer(Rc<DxvkCommandList> cmdList, Resources::RaytracingOutput& rtOutput, float frameTimeSecs,
+  void RtxContext::updateRaytraceArgsConstantBuffer(Resources::RaytracingOutput& rtOutput, float frameTimeSecs,
                                                     const VkExtent3D& downscaledExtent, const VkExtent3D& targetExtent) {
     ScopedCpuProfileZone();
     // Prepare shader arguments
@@ -934,7 +950,7 @@ namespace dxvk {
 
       updateBuffer(cb, 0, sizeof(constants), &constants);
 
-      cmdList->trackResource<DxvkAccess::Read>(cb);
+      m_cmd->trackResource<DxvkAccess::Read>(cb);
     }
   }
 
@@ -1122,7 +1138,7 @@ namespace dxvk {
         DxvkContextFlag::CpDirtyDescriptorBinding);
     }
 
-    denoiser.dispatch(m_cmd, this, m_execBarriers, rtOutput, denoiseInput, denoiseOutput);
+    denoiser.dispatch(this, m_execBarriers, rtOutput, denoiseInput, denoiseOutput);
   }
 
   void RtxContext::dispatchDenoise(const Resources::RaytracingOutput& rtOutput, float frameTimeSecs) {
@@ -1147,15 +1163,15 @@ namespace dxvk {
       if (denoiser.isReferenceDenoiserEnabled()) {
         denoiseInput.reference = denoiseInput.diffuse_hitT;
         denoiseOutput.reference = denoiseOutput.diffuse_hitT;
-        denoiser.dispatch(m_cmd, this, m_execBarriers, rtOutput, denoiseInput, denoiseOutput);
+        denoiser.dispatch(this, m_execBarriers, rtOutput, denoiseInput, denoiseOutput);
 
         // Reference denoiser accumulates internally, so the second signal has to be denoised through a separate reference denoiser
         secondLobeReferenceDenoiser.copyNrdSettingsFrom(denoiser);
         denoiseInput.reference = denoiseInput.specular_hitT;
         denoiseOutput.reference = denoiseOutput.specular_hitT;
-        secondLobeReferenceDenoiser.dispatch(m_cmd, this, m_execBarriers, rtOutput, denoiseInput, denoiseOutput);
+        secondLobeReferenceDenoiser.dispatch(this, m_execBarriers, rtOutput, denoiseInput, denoiseOutput);
       } else
-        denoiser.dispatch(m_cmd, this, m_execBarriers, rtOutput, denoiseInput, denoiseOutput);
+        denoiser.dispatch(this, m_execBarriers, rtOutput, denoiseInput, denoiseOutput);
     };
 
     // Primary direct denoiser used for primary direct lighting when separated, otherwise a special combined direct+indirect denoiser is used when both direct and indirect signals are combined.
@@ -1238,7 +1254,7 @@ namespace dxvk {
   void RtxContext::dispatchDLSS(const Resources::RaytracingOutput& rtOutput) {
     DxvkDLSS& dlss = m_common->metaDLSS();
 
-    dlss.dispatch(m_cmd, this, m_execBarriers, rtOutput, m_resetHistory);
+    dlss.dispatch(this, m_execBarriers, rtOutput, m_resetHistory);
   }
 
   void RtxContext::dispatchNIS(const Resources::RaytracingOutput& rtOutput) {
@@ -1256,7 +1272,7 @@ namespace dxvk {
       float jitterOffset[2];
       mainCamera.getJittering(jitterOffset);
 
-      taa.dispatch(m_cmd, this,
+      taa.dispatch(this,
         getResourceManager().getSampler(VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE),
         mainCamera.getShaderConstants().resolution,
         jitterOffset,
@@ -1283,7 +1299,7 @@ namespace dxvk {
     settings.useDLSS = shouldUseDLSS();
     settings.demodulateRoughness = m_common->metaDemodulate().demodulateRoughness();
     settings.roughnessDemodulationOffset = m_common->metaDemodulate().demodulateRoughnessOffset();
-    m_common->metaComposite().dispatch(m_cmd, this,
+    m_common->metaComposite().dispatch(this,
       getSceneManager(),
       rtOutput, settings);
   }
@@ -1305,7 +1321,7 @@ namespace dxvk {
     adjustedDeltaTime = std::max(0.f, adjustedDeltaTime);
 
     DxvkAutoExposure& autoExposure = m_common->metaAutoExposure();    
-    autoExposure.dispatch(m_cmd, this, 
+    autoExposure.dispatch(this, 
       getResourceManager().getSampler(VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER),
       rtOutput, adjustedDeltaTime, performSRGBConversion);
 
@@ -1315,14 +1331,14 @@ namespace dxvk {
     // until it converges and thus making comparison of raytracing mode outputs more difficult    
     if(RtxOptions::Get()->tonemappingMode() == TonemappingMode::Global) {
       DxvkToneMapping& toneMapper = m_common->metaToneMapping();
-      toneMapper.dispatch(m_cmd, this, 
+      toneMapper.dispatch(this, 
         getResourceManager().getSampler(VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER),
         autoExposure.getExposureTexture().view,
         rtOutput, adjustedDeltaTime, performSRGBConversion, autoExposure.enabled());
     }
     DxvkLocalToneMapping& localTonemapper = m_common->metaLocalToneMapping();
     if (localTonemapper.shouldDispatch()){
-      localTonemapper.dispatch(m_cmd, this,
+      localTonemapper.dispatch(this,
         getResourceManager().getSampler(VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE),
         autoExposure.getExposureTexture().view,
         rtOutput, adjustedDeltaTime, performSRGBConversion, autoExposure.enabled());
@@ -1339,7 +1355,7 @@ namespace dxvk {
     this->spillRenderPass(false);
     this->unbindComputePipeline();
 
-    bloom.dispatch(m_cmd, this,
+    bloom.dispatch(this,
       getResourceManager().getSampler(VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE),
       rtOutput.m_finalOutput);
   }
@@ -1352,7 +1368,7 @@ namespace dxvk {
       return;
     }
 
-    postFx.dispatch(m_cmd, this,
+    postFx.dispatch(this,
       getResourceManager().getSampler(VK_FILTER_NEAREST, VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE),
       getResourceManager().getSampler(VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE),
       mainCamera.getShaderConstants().resolution,
@@ -1394,13 +1410,35 @@ namespace dxvk {
     if (!debugView.shouldDispatch())
       return;
 
-    debugView.dispatch(m_cmd, this,
+    debugView.dispatch(this,
       getResourceManager().getSampler(VK_FILTER_NEAREST, VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE),
       getResourceManager().getSampler(VK_FILTER_LINEAR, VK_SAMPLER_MIPMAP_MODE_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE),
       srcImage, rtOutput, *m_common);
 
     if (captureScreenImage)
       takeScreenshot("rtxImageDebugView", debugView.getDebugOutput()->image());
+  }
+
+  void RtxContext::dispatchDLFG() {
+    if (!isDLFGEnabled()) {
+      return;
+    }
+
+    // force vsync off if DLFG is enabled, as we don't properly support FG + vsync
+    RtxOptions::Get()->enableVsyncRef() = EnableVsync::Off;
+
+    Resources::RaytracingOutput& rtOutput = getResourceManager().getRaytracingOutput();
+
+    DxvkFrameInterpolationInfo dlfgInfo = {
+      m_device->getCurrentFrameId(),
+      m_device->getCommon()->getSceneManager().getCamera(),
+      rtOutput.m_primaryScreenSpaceMotionVector.view,
+      rtOutput.m_primaryScreenSpaceMotionVector.image->info().layout,
+      rtOutput.m_primaryDepth.view,
+      rtOutput.m_primaryDepth.image->info().layout,
+      false
+    };
+    m_device->setupFrameInterpolation(dlfgInfo);
   }
 
   void RtxContext::flushCommandList() {

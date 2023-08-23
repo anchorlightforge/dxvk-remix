@@ -24,6 +24,7 @@
 
 #include <limits>
 #include <cassert>
+#include <Windows.h>
 
 #include "NvLowLatencyVk.h"
 #include "pclstats.h"
@@ -65,11 +66,17 @@ namespace dxvk {
     // Initialize PCL stats
     // Note: PCL stats are always desired even if Reflex itself is disabled, so this is done before any checks for Reflex enablement/support.
 
-    ++s_initPclRefcount;
+    m_instanceId = s_initPclRefcount++;
 
-    if (s_initPclRefcount == 1) {
-      PCLSTATS_SET_ID_THREAD(-1);
+    if (m_instanceId == 0) {
       PCLSTATS_INIT(0);
+
+      // Note: Currently PCLSTATS_INIT does not have error checking for if the creation of a stats window message fails, so we check it here
+      // just to catch any potential issues with the API (as passing this 0 to the PeekMessage filters will not function correctly and will
+      // cause PCL pings on WM_NULL messages).
+      assert(g_PCLStatsWindowMessage != 0);
+    } else {
+      Logger::warn("Reflex PCL stats multiple initialization detected.");
     }
 
     // Determine Reflex enablement
@@ -118,9 +125,7 @@ namespace dxvk {
     // Deinitialize PCL stats
     // Note: Deinitialize always even if Reflex was not initialized as PCL stats are initialized always.
 
-    --s_initPclRefcount;
-
-    if (s_initPclRefcount == 0) {
+    if (--s_initPclRefcount == 0) {
       PCLSTATS_SHUTDOWN();
     }
 
@@ -137,9 +142,13 @@ namespace dxvk {
   }
 
   void RtxReflex::sleep() const {
-    // Early out if Reflex was not initialized or if the Reflex mode is set to None
+    // Early out if Reflex was not initialized
+    // Note: This Reflex sleep code is run even when the Reflex mode is set to None as this is the recommendation from the
+    // Reflex team as the API expects the sleep function to be called even in this case. Do note however that this does have
+    // a very slight performance cost which is why previously an early out was done here when the Reflex mode was set to None,
+    // though it is nothing major though that'd affect the framerate (at least in current testing).
 
-    if (!reflexInitialized() || RtxOptions::Get()->reflexMode() == ReflexMode::None) {
+    if (!reflexInitialized()) {
       return;
     }
 
@@ -176,6 +185,66 @@ namespace dxvk {
     }
   }
 
+  void RtxReflex::setLatencyPingThread() const {
+    // Early out if this is not the first Reflex instance
+    // Note: This is done so that PCL stats are only handled on a single Reflex instance if multiple exist in a thread-safe manner.
+
+    if (m_instanceId != 0) {
+      return;
+    }
+
+    // Set the PCL stats thread ID to the current thread
+
+    [[maybe_unused]] const auto currentThread = ::GetCurrentThreadId();
+
+    if (currentThread != 0) {
+      PCLSTATS_SET_ID_THREAD(currentThread);
+    }
+  }
+
+  void RtxReflex::latencyPing(std::uint64_t frameId) const {
+#ifdef REFLEX_TRACY_MARKERS
+    ScopedCpuProfileZoneDynamic(str::format("Latency Ping ", frameId));
+#endif
+
+    // Early out if this is not the first Reflex instance
+
+    if (m_instanceId != 0) {
+      return;
+    }
+
+    // Ensure messages are being peeked on the intended thread
+
+    // Note: Ensure the PCL stats thread ID has been set to begin with.
+    assert(g_PCLStatsIdThread != 0);
+
+    [[maybe_unused]] const auto currentThread = ::GetCurrentThreadId();
+
+    if (currentThread != 0) {
+      assert(g_PCLStatsIdThread == currentThread);
+    }
+
+    // Place latency ping marker when requested
+
+    MSG msg;
+    // Note: A HWND of -1 indicates that PeekMessage should only peek messages on the current thread.
+    const HWND kCurrentThreadId = reinterpret_cast<HWND>(-1);
+    bool sendPclPing = false;
+
+    // Note: This peek will remove messages from the queue so it should be allowed to go over all of them rather than breaking early.
+    while (PeekMessage(&msg, kCurrentThreadId, g_PCLStatsWindowMessage, g_PCLStatsWindowMessage, PM_REMOVE)) {
+      // Note: PeekMessage even with wMsgFilterMin and wMsgFilterMax set can still return messages outside this range, specifically WM_QUIT,
+      // so a check here is required.
+      if (PCLSTATS_IS_PING_MSG_ID(msg.message)) {
+        sendPclPing = true;
+      }
+    }
+
+    if (sendPclPing) {
+      setMarker(frameId, VK_PC_LATENCY_PING);
+    }
+  }
+
   void RtxReflex::beginSimulation(std::uint64_t frameId) const {
 #ifdef REFLEX_TRACY_MARKERS
     ScopedCpuProfileZoneDynamic(str::format("Begin Simulation ", frameId));
@@ -184,23 +253,6 @@ namespace dxvk {
     // Place simulation start marker
 
     setMarker(frameId, VK_SIMULATION_START);
-
-    // Place latency ping marker when requested
-
-    MSG msg;
-    const HWND kCurrentThreadId = (HWND) (-1);
-    bool sendPclPing = false;
-
-    // Note: This peek will remove messages from the queue so it should be allowed to go over all of them rather than breaking early.
-    while (PeekMessage(&msg, kCurrentThreadId, g_PCLStatsWindowMessage, g_PCLStatsWindowMessage, PM_REMOVE)) {
-      sendPclPing = true;
-
-      assert(PCLSTATS_IS_PING_MSG_ID(msg.message));
-    }
-
-    if (sendPclPing) {
-      setMarker(frameId, VK_PC_LATENCY_PING);
-    }
   }
 
   void RtxReflex::endSimulation(std::uint64_t frameId) const {
@@ -252,7 +304,47 @@ namespace dxvk {
     // initialized for PCL stats.
     setMarker(frameId, VK_PRESENT_END);
   }
-  
+
+  void RtxReflex::beginOutOfBandRendering(std::uint64_t frameId) const {
+#ifdef REFLEX_TRACY_MARKERS
+    ScopedCpuProfileZoneDynamic(str::format("Begin Async Rendering ", frameId));
+#endif
+
+    // Note: Reflex initialization not checked here as setMarker checks internally and needs to be called even when Reflex is not
+    // initialized for PCL stats.
+    setMarker(frameId, VK_OUT_OF_BAND_RENDERSUBMIT_START);
+  }
+
+  void RtxReflex::endOutOfBandRendering(std::uint64_t frameId) const {
+#ifdef REFLEX_TRACY_MARKERS
+    ScopedCpuProfileZoneDynamic(str::format("End Async Rendering ", frameId));
+#endif
+
+    // Note: Reflex initialization not checked here as setMarker checks internally and needs to be called even when Reflex is not
+    // initialized for PCL stats.
+    setMarker(frameId, VK_OUT_OF_BAND_RENDERSUBMIT_END);
+  }
+
+  void RtxReflex::beginOutOfBandPresent(std::uint64_t frameId) const {
+#ifdef REFLEX_TRACY_MARKERS
+    ScopedCpuProfileZoneDynamic(str::format("Begin Async Present ", frameId));
+#endif
+
+    // Note: Reflex initialization not checked here as setMarker checks internally and needs to be called even when Reflex is not
+    // initialized for PCL stats.
+    setMarker(frameId, VK_OUT_OF_BAND_PRESENT_START);
+  }
+
+  void RtxReflex::endOutOfBandPresent(std::uint64_t frameId) const {
+#ifdef REFLEX_TRACY_MARKERS
+    ScopedCpuProfileZoneDynamic(str::format("End Async Present ", frameId));
+#endif
+
+    // Note: Reflex initialization not checked here as setMarker checks internally and needs to be called even when Reflex is not
+    // initialized for PCL stats.
+    setMarker(frameId, VK_OUT_OF_BAND_PRESENT_END);
+  }
+
   LatencyStats RtxReflex::getLatencyStats() const {
     // Note: Initialize all stats to zero in case Reflex is not initialized or getting latency params fails.
     LatencyStats latencyStats{};
@@ -484,10 +576,6 @@ namespace dxvk {
   void RtxReflex::setMarker(std::uint64_t frameId, std::uint32_t marker) const {
     // Set PCL markers
 
-    if (g_PCLStatsIdThread == -1) {
-      PCLSTATS_SET_ID_THREAD(::GetCurrentThreadId());
-    }
-
     PCLSTATS_MARKER(marker, frameId);
 
     // Early out if Reflex was not initialized
@@ -511,4 +599,12 @@ namespace dxvk {
     }
   }
 
+  void RtxReflex::markOutOfBandPresentQueue(VkQueue queueHandle) {
+    if (!reflexInitialized()) {
+      return;
+    }
+
+    // Note: This is marking that the queue in question is used for OOB presenting, not that it is a queue from a present queue family.
+    NvLL_VK_NotifyOutOfBandQueue(m_device->handle(), queueHandle, VK_OUT_OF_BAND_QUEUE_TYPE_PRESENT);
+  }
 }
