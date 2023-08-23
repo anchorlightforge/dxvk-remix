@@ -22,6 +22,7 @@
 #pragma once
 
 #include <cstdint>
+#include <vulkan/vulkan.h>
 
 #include "rtx_resources.h"
 #include "rtx_options.h"
@@ -104,6 +105,14 @@ namespace dxvk {
       */
     void sleep() const;
     /**
+      * \brief: Sets the thread latency ping requests will be sent to. Should match the thread latencyPing is called from.
+      */
+    void setLatencyPingThread() const;
+    /**
+      * \brief: Handles the addition of a latency ping if requested externally. Should only be called from the thread specified by setLatencyPingThread.
+      */
+    void latencyPing(std::uint64_t frameId) const;
+    /**
       * \brief: Adds a marker for the start of the simulation. Thread-safe with respect to Reflex.
       */
     void beginSimulation(std::uint64_t frameId) const;
@@ -127,6 +136,10 @@ namespace dxvk {
       * \brief: Adds a marker for the end of presentation. Thread-safe with respect to Reflex.
       */
     void endPresentation(std::uint64_t frameId) const;
+    void beginOutOfBandRendering(std::uint64_t frameId) const;
+    void endOutOfBandRendering(std::uint64_t frameId) const;
+    void beginOutOfBandPresent(std::uint64_t frameId) const;
+    void endOutOfBandPresent(std::uint64_t frameId) const;
 
     void updateMode();
 
@@ -148,9 +161,18 @@ namespace dxvk {
       */
     bool reflexInitialized() const { return m_initialized; }
 
+    /**
+      * \brief: Marks a specified queue as the out of band present queue, indicating to Reflex that out of band
+      * presents will come from this queue (typically from a frame interpolation method like DLFG).
+      */
+    void markOutOfBandPresentQueue(VkQueue queueHandle);
+  
   private:
     VkSemaphore m_lowLatencySemaphore;
 
+    // Note: The ID of this Reflex instance refcount wise, needed for some singleton-esque behavior. Not needed
+    // if this Reflex class is ever reworked to more of a singleton itself.
+    std::uint32_t m_instanceId;
     // Note: Cached from options determining this state on construction as Reflex currently only has 1
     // chance to be initialized, meaning this state cannot be changed at runtime past the point of construction.
     bool m_enabled = false;

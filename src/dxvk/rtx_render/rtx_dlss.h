@@ -27,7 +27,7 @@
 
 namespace dxvk {
 
-  class NGXWrapper;
+  class NGXDLSSContext;
   class DxvkCommandList;
   class DxvkBarrierSet;
   class DxvkContext;
@@ -66,7 +66,6 @@ namespace dxvk {
     void getOutputSize(uint32_t& width, uint32_t& height) const;
 
     void dispatch(
-      Rc<DxvkCommandList> cmdList,
       Rc<RtxContext> ctx,
       DxvkBarrierSet& barriers,
       const Resources::RaytracingOutput& rtOutput,
@@ -77,12 +76,11 @@ namespace dxvk {
   private:
     static DLSSProfile getAutoProfile(uint32_t displayWidth, uint32_t displayHeight);
 
-    void initializeDLSS(Rc<DxvkContext> pRenderContext, Rc<DxvkCommandList> cmdList);
+    void initializeDLSS(Rc<DxvkContext> pRenderContext);
 
     bool useDlssAutoExposure() const;
 
     // Options
-    bool                        mEnabled = true;
     DLSSProfile                 mProfile = DLSSProfile::Invalid;
     DLSSProfile                 mActualProfile = DLSSProfile::Invalid;
     MotionVectorScale           mMotionVectorScale = MotionVectorScale::Absolute;
@@ -99,5 +97,7 @@ namespace dxvk {
 
     Rc<DxvkShader> m_shader;
     Rc<DxvkBuffer> m_constants;
+
+    std::unique_ptr<NGXDLSSContext> m_dlssContext;
   };
 }  // namespace dxvk

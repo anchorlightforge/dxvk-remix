@@ -20,44 +20,28 @@
 * DEALINGS IN THE SOFTWARE.
 */
 #pragma once
-#include "dxvk_include.h"
-#include "dxvk_device.h"
 
-namespace dxvk {
-  class RtxSemaphore : public sync::Signal {
-    DxvkDevice* m_device;
-    VkSemaphore m_sema;
-    bool m_isTimeline;
-    
-    RtxSemaphore() = default;
+#define NEE_CACHE_PROBE_RESOLUTION 32
+#define NEE_CACHE_ELEMENTS 16
+// Element size in bytes
+#define NEE_CACHE_ELEMENT_SIZE 4 * 2
+#define NEE_CACHE_TASK_SIZE 4
+#define NEE_CACHE_EMPTY_TASK 0xffffffff
+#define NEE_CACHE_SAMPLES 16
+#define NEE_CACHE_LIGHT_ELEMENTS 16
+#define NEE_CACHE_LIGHT_ELEMENT_SIZE 4 * 2
+#define NEE_CACHE_CELL_CANDIDATE_TOTAL_SIZE (NEE_CACHE_ELEMENTS * NEE_CACHE_ELEMENT_SIZE + NEE_CACHE_LIGHT_ELEMENTS * NEE_CACHE_LIGHT_ELEMENT_SIZE)
+#define NEE_CACHE_CELL_TASK_TOTAL_SIZE NEE_CACHE_TASK_SIZE * NEE_CACHE_ELEMENTS * 2
 
-    void labelSemaphore(const char* name);
+struct NeeCache_PackedSample
+{
+  uint4 hitGeometry;              ///< position and normal.
+  uint4 lightInfo;                ///< radiance and pdf
+};
 
-  public:
-    static RtxSemaphore* createTimeline(DxvkDevice* device, const char* name, uint64_t initialValue = 0, bool win32Shared = false);
-    static RtxSemaphore* createBinary(DxvkDevice* device, const char* name);
-    
-    ~RtxSemaphore() override;
-
-    uint64_t value() const override;
-    void signal(uint64_t value) override;
-    void wait(uint64_t value) override;
-
-    inline VkSemaphore handle() const {
-      return m_sema;
-    }
-  };
-
-  class RtxFence : public RcObject {
-    DxvkDevice* m_device;
-    VkFence m_fence = nullptr;
-
-  public:
-    RtxFence(DxvkDevice* device);
-    ~RtxFence();
-
-    inline VkFence handle() const {
-      return m_fence;
-    }
-  };
-}
+enum class NeeEnableMode
+{
+  None = 0,
+  SpecularOnly = 1,
+  All = 2,
+};

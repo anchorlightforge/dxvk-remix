@@ -44,10 +44,10 @@ Texture2D<float4> InColorTexture;
 layout(rgba16f, binding = POST_FX_MOTION_BLUR_OUTPUT)
 RWTexture2D<float4> OutColorTexture;
 
-layout(rgba16f, binding = POST_FX_MOTION_BLUR_NEAREST_SAMPLER)
+layout(binding = POST_FX_MOTION_BLUR_NEAREST_SAMPLER)
 SamplerState NearestSampler;
 
-layout(rgba16f, binding = POST_FX_MOTION_BLUR_LINEAR_SAMPLER)
+layout(binding = POST_FX_MOTION_BLUR_LINEAR_SAMPLER)
 SamplerState LinearSampler;
 
 layout(push_constant)
@@ -196,7 +196,7 @@ void main(
   const float2 velocity =
     PrimaryScreenSpaceMotionVector.SampleLevel(LinearSampler, uv, 0.0f).xy * cb.exposureFraction * cb.invMainCameraResolution * dynamicMotionBlurDeduction * 0.5f ;
   const float velocityLength = length(velocity);
-  const float2 adjustedVelocity = velocityLength > 1e-7f ? normalize(velocity) * min(velocityLength, cb.blurDiameterFraction) : velocity;
+  const float2 adjustedVelocity = velocityLength > 1e-7f ? normalize(velocity) * min(velocityLength, cb.blurDiameterFraction) * cb.motionBlurDlfgDeduction : velocity;
   const float2 minimunVelocity = (float2)cb.invImageSize * cb.motionBlurMinimumVelocityThresholdInPixel.xx;
 
   // Mask out pixels if the primary ray hits viewModel, player hold model or the velocity less than 1 pixel in all dimensions

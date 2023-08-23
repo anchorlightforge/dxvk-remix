@@ -79,6 +79,7 @@ public:
   uint32_t getFrameAge() const { return m_frameLastUpdated - m_frameCreated; }
   // Signal this object should be collected on the next GC pass
   void markForGarbageCollection() const;
+  void markAsUnlinkedFromBlasEntryForGarbageCollection() const;
   void markAsInsideFrustum() const;
   void markAsOutsideFrustum() const;
   // Returns true if a new camera type was registered
@@ -129,6 +130,7 @@ private:
   mutable uint32_t m_instanceVectorId; // Index within instance vector in instance manager
 
   mutable bool m_isMarkedForGC = false;
+  mutable bool m_isUnlinkedForGC = false;
   mutable bool m_isInsideFrustum = true;
   mutable uint32_t m_frameLastUpdated = kInvalidFrameIndex;
   mutable uint32_t m_frameCreated = kInvalidFrameIndex;
@@ -161,7 +163,10 @@ private:
   VkGeometryFlagsKHR m_geometryFlags = 0;
   uint32_t m_firstBillboard = 0;
   uint32_t m_billboardCount = 0;
-  uint64_t m_lastDecalOffsetVertexDataVersion = 0;
+
+  // Used decal offsetting parameters
+  XXH64_hash_t m_lastDecalOffsetVertexDataVersion = kEmptyHash;
+  uint32_t m_currentDecalOffsetDifference = UINT32_MAX;
 
 public:
 
@@ -248,10 +253,10 @@ public:
   RtInstance* createInstanceCopy(const RtInstance& reference, bool generateValidID = true);
 
   // Creates a view model instance from the reference and adds it to the instance pool
-  RtInstance* createViewModelInstance(Rc<DxvkContext> ctx, Rc<DxvkCommandList> cmdList, const RtInstance& reference, const Matrix4& perspectiveCorrection, const Matrix4& prevPerspectiveCorrection);
+  RtInstance* createViewModelInstance(Rc<DxvkContext> ctx, const RtInstance& reference, const Matrix4& perspectiveCorrection, const Matrix4& prevPerspectiveCorrection);
 
   // Creates view model instances and their virtual counterparts
-  void createViewModelInstances(Rc<DxvkContext> ctx, Rc<DxvkCommandList> cmdList, const CameraManager& cameraManager, const RayPortalManager& rayPortalManager);
+  void createViewModelInstances(Rc<DxvkContext> ctx, const CameraManager& cameraManager, const RayPortalManager& rayPortalManager);
 
   void createPlayerModelVirtualInstances(Rc<DxvkContext> ctx, const CameraManager& cameraManager, const RayPortalManager& rayPortalManager);
 
@@ -279,14 +284,8 @@ private:
   bool m_previousViewModelState = false;
   RtInstance* targetInstance = nullptr;
 
-  // The "index" is just a multiplier for the offset that is applied to each decal along normal.
-  // Index of 1 means the offset is "rtx.decalNormalOffset" units, 2 is double that, etc.
-  // Start with 1 so that all decals receive at least some offset, to handle cases when they are coplanar with walls.
-  static constexpr uint32_t c_firstDecalIndex = 1;
-  // This is the maximum value of m_currentDecalIndex after which it is reset back to c_firstDecalIndex.
-  static constexpr uint32_t c_decalIndexWraparound = 64;
-  uint32_t m_currentDecalIndex = c_firstDecalIndex;
-  
+  uint32_t m_currentDecalOffsetIndex;
+    
   // Controls active portal space for which virtual view model or player model instances have been generated for.
   // Negative values mean there is no portal that's close enough to the camera.
   int m_virtualInstancePortalIndex = 0;    

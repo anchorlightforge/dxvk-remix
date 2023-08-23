@@ -39,6 +39,10 @@ static const uint kRNGOffsetSampleClosestHitShader = 4;
 // Approximate number of rng samples per bounce
 static const uint kApproxRNGSamplesPerBounce = 16;
 
+#define NEE_CACHE_STATE_DISABLED 0
+#define NEE_CACHE_STATE_LAST_ENABLED 1
+#define NEE_CACHE_STATE_ENABLED 2
+
 // Path state to be passed to functions (or the CHS) handling a path vertex.
 struct PathState
 {
@@ -80,6 +84,8 @@ struct PathState
 
   float accumulatedHitDistance;
   float solidAnglePdf;
+  uint16_t neeCacheCellOffset;
+  bool enableNeeCacheAfterFirstBounce;
 
   // Calculates an RNG offset at a start of a bounce set in the path state
   uint calculateRNGOffset(uint sampleOffset) 
@@ -115,7 +121,7 @@ struct MemoryPathState : IPayload
 
   uint coneRadiusAndHitDistance; // float16_t, float16_t
   float accumulatedHitDistance;
-  float solidAnglePdf;
+  uint solidAnglePdfAndNeeCacheCellOffset;
 
   static MemoryPathState pack(PathState pathState)
   {
@@ -127,6 +133,7 @@ struct MemoryPathState : IPayload
       (uint32_t(pathState.mediumMaterialIndex & 0xff) << 24);
 
     ret.data1 =
+      (uint32_t(pathState.enableNeeCacheAfterFirstBounce) << 6) | 
       (uint32_t(pathState.restirGiHasFoundRoughSurface) << 7) | 
       (uint32_t(pathState.rayMask) << 8) | 
       (uint32_t(pathState.portalSpace) << 16) |
@@ -157,7 +164,8 @@ struct MemoryPathState : IPayload
     ret.encodedRadiance = encodedRadiance;
     ret.encodedThroughput = encodedThroughput;
     ret.accumulatedHitDistance = pathState.accumulatedHitDistance;
-    ret.solidAnglePdf = pathState.solidAnglePdf;
+    ret.solidAnglePdfAndNeeCacheCellOffset = (float16BitsToUint16(pathState.solidAnglePdf) | (uint32_t(pathState.neeCacheCellOffset) << 16));
+
     
     return ret;
   }
@@ -192,12 +200,14 @@ struct MemoryPathState : IPayload
     pathState.insideMedium = packedFlagGet(encodedThroughput.z, 1 << 31);
     pathState.decalEncountered = packedFlagGet(encodedRadiance.y, 1 << 31);
 
+    pathState.enableNeeCacheAfterFirstBounce = (data1 >> 6) & 0b1;
     pathState.restirGiHasFoundRoughSurface = (data1 >> 7) & 0b1;
     pathState.rayMask = (data1 >> 8) & 0xff;
     pathState.portalSpace = (data1 >> 16) & 0b11;
     pathState.indirectLightPortalID = (data1 >> 18) & 0b11;
     pathState.accumulatedHitDistance = accumulatedHitDistance;
-    pathState.solidAnglePdf = solidAnglePdf;
+    pathState.solidAnglePdf = uint16BitsToHalf(solidAnglePdfAndNeeCacheCellOffset & 0xffff);
+    pathState.neeCacheCellOffset = (solidAnglePdfAndNeeCacheCellOffset >> 16);
 
     return pathState;
   }
@@ -220,6 +230,8 @@ struct MemoryPathState : IPayload
 #else
   bool shouldReorder(out uint coherenceHints, out uint numCoherenceHints)
   {
+    coherenceHints = 0;
+    numCoherenceHints = 0;
     return false;
   }
 #endif

@@ -123,7 +123,7 @@ namespace dxvk {
     void bindCommonRayTracingResources(const Resources::RaytracingOutput& rtOutput);
 
     void getDenoiseArgs(NrdArgs& outPrimaryDirectNrdArgs, NrdArgs& outPrimaryIndirectNrdArgs, NrdArgs& outSecondaryNrdArgs);
-    void updateRaytraceArgsConstantBuffer(Rc<DxvkCommandList> cmdList, Resources::RaytracingOutput& rtOutput, float frameTimeSecs,
+    void updateRaytraceArgsConstantBuffer(Resources::RaytracingOutput& rtOutput, float frameTimeSecs,
                                           const VkExtent3D& downscaledExtent, const VkExtent3D& targetExtent);
 
     D3D9RtxVertexCaptureData& allocAndMapVertexCaptureConstantBuffer();
@@ -165,6 +165,7 @@ namespace dxvk {
     void dispatchBloom(const Resources::RaytracingOutput& rtOutput);
     void dispatchPostFx(Resources::RaytracingOutput& rtOutput);
     void dispatchDebugView(Rc<DxvkImage>& srcImage, const Resources::RaytracingOutput& rtOutput, bool captureScreenImage);
+    void dispatchDLFG();
     void updateMetrics(const float frameTimeSecs, const float gpuIdleTimeSecs) const;
 
     void rasterizeToSkyMatte(const DrawParameters& params, float minZ, float maxZ);

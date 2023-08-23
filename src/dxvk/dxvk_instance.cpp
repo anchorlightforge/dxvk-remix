@@ -76,6 +76,12 @@ namespace dxvk {
 
       // cmdResetQuery has reset commented out since it hits an AV on initial reset - need to update dxvk that handles resets differently
       ".*? After query pool creation, each query must be reset before it is used. Queries must also be reset between uses.$",
+      
+      // VL bug: it thinks we're using VK_FULL_SCREEN_EXCLUSIVE_APPLICATION_CONTROLLED_EXT when we're not
+      ".*? MessageID = 0x769aa5a9 .*?",
+
+      // VL does not know about VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_OPTICAL_FLOW_FEATURES_NV
+      ".*? MessageID = 0x901f59ec .*?\\(1000464000\\).*?",
     };
 
     for(auto& exp : ignoredErrors) {
@@ -216,60 +222,18 @@ namespace dxvk {
     Logger::info(str::format("Game: ", env::getExeName()));
     Logger::info(str::format("DXVK_Remix: ", DXVK_VERSION));
 
-    // NV-DXVK start: Custom config loading/logging
-
-    // Load configurations
-    // Note: Loading is done in the following order currently, each step overriding values in the previous
-    // configuration values when a conflict exist, resulting in the combined "effective" configuration:
-    // - Configuration defaults in code (Implicit)
-    // - dxvk.conf ("User Config")
-    // - Per-application configuration in code ("Built-in Config" from config.cpp)
-    // - rtx.conf ("RTX User Config")
-    //   - baseGameModPath/rtx.conf (Mod-specific extension of "RTX User Config")
-
-    auto userConfig = Config::getUserConfig();
-    userConfig.logOptions("User");
-    // Note: Moved since this is the first set of configuration values to be set, so no need to merge.
-    m_config = std::move(userConfig);
-
-    const auto appConfig = Config::getAppConfig(env::getExePath());
-    appConfig.logOptions("Built-in");
-    m_config.merge(appConfig);
-
-    // Handle games that have native mod support, where the base game looks into another folder for mod, 
-    // and the new asset path is passed in through the command line
-    std::string baseGameModPath = ModManager::getBaseGameModPath(
-      m_config.getOption<std::string>("rtx.baseGameModRegex", "", ""),
-      m_config.getOption<std::string>("rtx.baseGameModPathRegex", "", ""));
-
-    // Set config so that any rtx option initialized later will use the value in that config object
-    // The start-up config contains the values from the code and dxvk.conf,
-    // while the custom config also contains values from rtx.conf
-    RtxOption<bool>::setStartupConfig(m_config);
-
-    const auto rtxUserConfig = Config::getRtxUserConfig(baseGameModPath);
-    rtxUserConfig.logOptions("RTX user");
-    m_config.merge(rtxUserConfig);
-
-    // Set custom config after the RTX user config has been merged into the config and
-    // update the RTX options
-    RtxOption<bool>::setCustomConfig(m_config);
-    RtxOption<bool>::updateRtxOptions();
-
-    // Log the combined "effective" configuration to be used
-    m_config.logOptions("Effective (combined)");
-
+    // NV-DXVK start: Decomposed growing config initialization
+    initConfigs();
     // NV-DXVK end 
+
+    m_options = DxvkOptions(m_config);
+    RtxOptions::Create(m_config);
 
     // NV-DXVK start: Wait for debugger functionality
     if (m_config.getOption<bool>("dxvk.waitForDebuggerToAttach", false, "DXVK_WAIT_FOR_DEBUGGER_TO_ATTACH"))
       while (!::IsDebuggerPresent())
         ::Sleep(100);
     // NV-DXVK end 
-
-    m_options = DxvkOptions(m_config);
-
-    RtxOptions::Create(m_config);
 
     m_extProviders.push_back(&DxvkPlatformExts::s_instance);
 
@@ -421,6 +385,14 @@ namespace dxvk {
     for (const auto& provider : m_extProviders)
       extensionsEnabled.merge(provider->getInstanceExtensions());
 
+    // NV-DXVK start: DLFG integration
+    std::vector<DxvkExt*> dlfgExtList = { {
+      &insExtensions.khrExternalMemoryCapabilities,
+      &insExtensions.khrExternalSemaphoreCapabilities
+    } };
+    extensionsAvailable.enableExtensions(dlfgExtList.size(), dlfgExtList.data(), extensionsEnabled);
+    // NV-DXVK end
+
     DxvkNameList extensionNameList = extensionsEnabled.toNameList();
     
     Logger::info("Enabled instance extensions:");
@@ -551,5 +523,62 @@ namespace dxvk {
     for (uint32_t i = 0; i < names.count(); i++)
       Logger::info(str::format("  ", names.name(i)));
   }
+  
+  // NV-DXVK start: Custom config loading/logging
+  void DxvkInstance::initConfigs() {
+    // Load configurations
+    // Note: Loading is done in the following order currently, each step overriding values in the previous
+    // configuration values when a conflict exist, resulting in the combined "effective" configuration:
+    // - Configuration defaults in code (Implicit)
+    // - dxvk.conf ("User Config"), can be multiple when set with envvar
+    // - Per-application configuration in code ("Built-in Config" from config.cpp)
+    // - rtx.conf ("RTX User Config"), can be multiple when set with envvar
+    //   - baseGameModPath/rtx.conf (Mod-specific extension of "RTX User Config")
+    m_config = Config();
+    initConfig<Config::Type_User>();
+    initConfig<Config::Type_App>();
+    initConfig<Config::Type_RtxUser>();
+    initConfig<Config::Type_RtxMod>();
+
+    RtxOption<bool>::updateRtxOptions();
+    m_config.logOptions("Effective (combined)");
+  }
+  
+  template<Config::Type type>
+  void DxvkInstance::initConfig() {
+    const auto name = Config::getDesc(type).name;
+    Logger::info(str::format("Init config: ", name));
+    std::string configPath = "";
+    if constexpr (type == Config::Type_RtxMod) {
+      // Handle games that have native mod support, where the base game looks into another folder for mod, 
+      // and the new asset path is passed in through the command line
+      const auto baseGameModPath = ModManager::getBaseGameModPath(
+        m_config.getOption<std::string>("rtx.baseGameModRegex", "", ""),
+        m_config.getOption<std::string>("rtx.baseGameModPathRegex", "", ""));
+      if (baseGameModPath.empty()) {
+        // Skip RtxMod if not present, as it may just pick up a different rtx.mod path
+        Logger::info("No base game mod path found. Skipping initilization.");
+        return;
+      } else {
+        Logger::info(str::format("Found base game mod path: ", baseGameModPath));
+        configPath = baseGameModPath;
+      }
+    }
+    m_confs[type] = Config::getConfig<type>(configPath);
+    m_confs[type].logOptions(name.c_str());
+    m_config.merge(m_confs[type]);
+    if constexpr (type == Config::Type_App) {
+      // Set config so that any rtx option initialized later will use the value in that config object
+      // The start-up config contains the values from the code and dxvk.conf, only.
+      RtxOption<bool>::setStartupConfig(m_config);
+      Logger::info("Set startup config.");
+    } else if constexpr ((type == Config::Type_RtxUser) || (type == Config::Type_RtxMod)) {
+      // Set custom config after the RTX user config has been merged into the config and
+      // update the RTX options. Contains values from rtx.conf
+      RtxOption<bool>::setCustomConfig(m_config);
+      Logger::info("Set custom config.");
+    }
+  }
+  // NV-DXVK end 
   
 }
