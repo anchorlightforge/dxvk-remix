@@ -2,7 +2,7 @@ name: Build
 
 on:
   push:
-    branches: [ main ]
+    branches: [ Release0.3-CloudBuild ]
   pull_request:
     branches: [ main ]
 
