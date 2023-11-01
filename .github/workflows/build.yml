@@ -2,7 +2,7 @@ name: Build
 
 on:
   push:
-    branches: [ main ]
+    branches: [ i14RenderTargetImGuiRebase ]
   pull_request:
     branches: [ main ]
 
