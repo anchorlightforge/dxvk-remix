@@ -17,9 +17,9 @@
 namespace dxvk {
   static const bool s_isDxvkResolutionEnvVarSet = (env::getEnvVar("DXVK_RESOLUTION_WIDTH") != "") || (env::getEnvVar("DXVK_RESOLUTION_HEIGHT") != "");
   
-  // We only look at RT 0 currently.
-  const uint32_t kRenderTargetIndex = 0;
-
+  // We only look at RT 0 currently.  branch changes this number on demand.
+  // const uint32_t kRenderTargetIndex = 0;
+  uint32_t kRenderTargetIndex = RtxOptions::renderTargetIndex();
   #define CATEGORIES_REQUIRE_DRAW_CALL     InstanceCategories::Sky, InstanceCategories::Terrain
   #define CATEGORIES_REQUIRE_GEOMETRY_COPY InstanceCategories::DecalStatic, InstanceCategories::DecalDynamic, InstanceCategories::DecalNoOffset, InstanceCategories::Terrain, InstanceCategories::WorldUI
 

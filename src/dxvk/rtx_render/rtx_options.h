@@ -875,7 +875,7 @@ namespace dxvk {
                "1 = CameraPosition - assume the first seen camera position is a sky camera.\n"
                "2 = CameraPositionAndDepthFlags - assume the first seen camera position is a sky camera, if its draw call's depth test is disabled. If it's enabled, assume no sky camera.\n"
                "Note: if all draw calls are marked as sky, then assume that there's no sky camera at all.");
-
+    RTX_OPTION("rtx", uint32_t,renderTargetIndex,0,"The render target to use when rendering game info.  Originally hardcoded to 0. This option will most likely not have any useful impact, leave at 0.");
     // TODO (REMIX-656): Remove this once we can transition content to new hash
     RTX_OPTION("rtx", bool, logLegacyHashReplacementMatches, false, "");
 

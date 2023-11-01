@@ -2027,6 +2027,7 @@ namespace dxvk {
       ImGui::DragFloat("Scene Unit Scale", &RtxOptions::Get()->sceneScaleObject(), 0.01f, 0.01f, FLT_MAX, "%.3f", sliderFlags);
       ImGui::Checkbox("Scene Z-Up", &RtxOptions::Get()->zUpObject());
       ImGui::Checkbox("Scene Left-Handed", &RtxOptions::Get()->isLHSObject());
+      ImGui::InputInt("Render Target Index", &RtxOptions::Get()->renderTargetIndexObject());
       fusedWorldViewModeCombo.getKey(&RtxOptions::Get()->fusedWorldViewModeRef());
       ImGui::Separator();
 
